@@ -28,9 +28,28 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT
 
+# ── Source .env.local for AWS_PROFILE / AWS_REGION ──────────────────────
+# Honor the same .env.local that aws-login.sh / aws-eks-context.sh use.
+# Search order:
+#   1. $REPO_ROOT/.env.local                (nexus-ai-engine repo, if present)
+#   2. $REPO_ROOT/../nexus-backend/.env.local  (sibling nexus-backend repo)
+# Anything already exported in the parent shell wins (set -o allexport only
+# imports keys that are not already set).
+for _envfile in "$REPO_ROOT/.env.local" "$REPO_ROOT/../nexus-backend/.env.local"; do
+    if [ -f "$_envfile" ]; then
+        set -o allexport
+        # shellcheck disable=SC1090
+        source "$_envfile"
+        set +o allexport
+        echo "📁 Loaded configuration from $_envfile"
+        break
+    fi
+done
+
 # ── Defaults ────────────────────────────────────────────────────────────
 ENV="dev"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+AWS_PROFILE="${AWS_PROFILE:-default}"
 CLUSTER_NAME=""
 NAMESPACE="ai-engine"
 SERVICE_ACCOUNT="ai-engine-role-sa"
@@ -61,6 +80,7 @@ End-to-end deploy + in-pod test runner for nexus-ai-engine.
 Options:
   --env ENV                Target environment (default: dev)
   --region REGION          AWS region (default: \$AWS_REGION or us-east-1)
+  --profile NAME           AWS CLI profile (default: \$AWS_PROFILE from .env.local or 'default')
   --cluster NAME           EKS cluster (default: from kubectl current-context)
   --namespace NS           K8s namespace (default: ai-engine)
   --ecr-registry URI       ECR registry URI (default: <account>.dkr.ecr.<region>.amazonaws.com)
@@ -90,6 +110,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --env)            ENV="$2"; shift 2 ;;
         --region)         REGION="$2"; shift 2 ;;
+        --profile)        AWS_PROFILE="$2"; shift 2 ;;
         --cluster)        CLUSTER_NAME="$2"; shift 2 ;;
         --namespace)      NAMESPACE="$2"; shift 2 ;;
         --ecr-registry)   ECR_REGISTRY="$2"; shift 2 ;;
@@ -138,9 +159,24 @@ if [ "$SKIP_BUILD" != "true" ] || [ "$SKIP_PUSH" != "true" ]; then
     require_cmd docker
 fi
 
+# Export AWS_PROFILE so all aws / kubectl child processes inherit it.
+# AWS CLI honors AWS_PROFILE env var when --profile is not passed; this
+# avoids threading --profile through every aws call below.
+export AWS_PROFILE
+export AWS_REGION="$REGION"
+export AWS_DEFAULT_REGION="$REGION"
+
+echo "   AWS profile:  $AWS_PROFILE"
+echo "   AWS region:   $REGION"
+
 if ! aws sts get-caller-identity >/dev/null 2>&1; then
-    echo "❌ AWS credentials are missing or expired."
-    echo "   Run ./aws-login.sh or ./aws-sso-login.sh first."
+    echo "❌ AWS credentials are missing or expired for profile '$AWS_PROFILE'."
+    echo ""
+    echo "   Log in first:"
+    echo "     ./aws-login.sh                # ADFS login"
+    echo "     ./aws-sso-login.sh            # SSO login"
+    echo ""
+    echo "   Or pass an explicit profile:  $0 --profile <name> ..."
     exit 1
 fi
 

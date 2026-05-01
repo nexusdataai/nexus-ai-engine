@@ -33,6 +33,24 @@ cleanup_tmp() {
 }
 trap cleanup_tmp EXIT
 
+# ── Source .env.local for AWS_PROFILE / AWS_REGION ──────────────────────
+# Honor the same .env.local that aws-login.sh / aws-eks-context.sh use.
+# Search order:
+#   1. $REPO_ROOT/.env.local                     (nexus-ai-engine repo, if present)
+#   2. $REPO_ROOT/../nexus-backend/.env.local    (sibling nexus-backend repo)
+# Anything already exported in the parent shell wins.
+REPO_ROOT="$( cd "$SCRIPT_DIR/../.." && pwd )"
+for _envfile in "$REPO_ROOT/.env.local" "$REPO_ROOT/../nexus-backend/.env.local"; do
+    if [ -f "$_envfile" ]; then
+        set -o allexport
+        # shellcheck disable=SC1090
+        source "$_envfile"
+        set +o allexport
+        echo "📁 Loaded configuration from $_envfile"
+        break
+    fi
+done
+
 # ── Configuration / defaults ────────────────────────────────────────────
 ROLE_NAME="ai-engine-role"
 POLICY_NAME="ai-engine-policy"
@@ -40,6 +58,7 @@ NAMESPACE="ai-engine"
 SERVICE_ACCOUNT="ai-engine-role-sa"
 
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-us-east-1}}"
+AWS_PROFILE="${AWS_PROFILE:-default}"
 CLUSTER_NAME=""
 ACCOUNT_ID=""
 OIDC_PROVIDER=""
@@ -88,6 +107,7 @@ Run as an AWS administrator with IAM + EC2 + EKS write permissions.
 
 Options:
   --region REGION          AWS region (default: \$AWS_REGION or us-east-1)
+  --profile NAME           AWS CLI profile (default: \$AWS_PROFILE from .env.local or 'default')
   --cluster NAME           EKS cluster name (default: from kubectl current-context)
   --account-id ID          AWS account ID (default: aws sts get-caller-identity)
   --oidc-provider URL      OIDC provider, no https:// prefix (default: from cluster)
@@ -120,6 +140,7 @@ EOF
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --region)            REGION="$2"; shift 2 ;;
+        --profile)           AWS_PROFILE="$2"; shift 2 ;;
         --cluster)           CLUSTER_NAME="$2"; shift 2 ;;
         --account-id)        ACCOUNT_ID="$2"; shift 2 ;;
         --oidc-provider)     OIDC_PROVIDER="$2"; shift 2 ;;
@@ -160,12 +181,23 @@ if [ "$DO_VPC" = "true" ] || [ -z "$CLUSTER_NAME" ]; then
     require_cmd kubectl
 fi
 
+# Export AWS_PROFILE / AWS_REGION so all aws / kubectl child processes
+# inherit them. AWS CLI honors AWS_PROFILE when --profile is not passed.
+export AWS_PROFILE
+export AWS_REGION="$REGION"
+export AWS_DEFAULT_REGION="$REGION"
+
+echo "   AWS profile:  $AWS_PROFILE"
+echo "   AWS region:   $REGION"
+
 if ! aws sts get-caller-identity >/dev/null 2>&1; then
-    echo "❌ AWS credentials are missing or expired."
+    echo "❌ AWS credentials are missing or expired for profile '$AWS_PROFILE'."
     echo ""
     echo "   Log in first:"
     echo "     ./aws-login.sh                # ADFS login"
     echo "     ./aws-sso-login.sh            # SSO login"
+    echo ""
+    echo "   Or pass an explicit profile:  $0 --profile <name> ..."
     exit 1
 fi
 

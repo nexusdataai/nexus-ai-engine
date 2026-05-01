@@ -37,7 +37,8 @@ def test_invalid_shape_is_reported(tmp_path: Path) -> None:
 
 
 @pytest.mark.e2e
-def test_runner_bound_to_app_reports_pending_phase_9(journey_runner, samples_dir: Path) -> None:
+def test_runner_bound_to_app_runs_to_completion(journey_runner, samples_dir: Path) -> None:
     result = journey_runner.run(samples_dir / "hello.yaml")
-    assert result.status == "pending_phase_9"
-    assert not result.ok
+    assert result.status in {"completed", "failed", "cancelled"}
+    assert result.journey_id is not None
+    assert result.job_id is not None

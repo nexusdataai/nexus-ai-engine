@@ -1,6 +1,6 @@
-"""Prompts router (list, types, get, update, reset, audit).
+"""Prompts router — activated against the in-memory engine.
 
-PORT FIDELITY CHECKLIST — do not simplify when porting.
+PORT FIDELITY CHECKLIST — do not simplify when porting the DynamoDB adapter.
 Source: /opt/mycode/nexus/nexus-backend/src/apis/prompts_api.py
 
     GET    ""              (list)     lines 49-75    (list_prompts)
@@ -10,52 +10,57 @@ Source: /opt/mycode/nexus/nexus-backend/src/apis/prompts_api.py
     POST   /reset                      lines 174-203  (reset_prompts)
     GET    /audit/log                  lines 204-end  (audit_log)
 
-Routes activate in phase 5 of the extraction plan; until then they return 501.
-
-See docs/ROUTE_PARITY.md for the full rules.
+Current status: activated against an in-memory engine. When the DynamoDB
+adapter lands in phase 10 it replaces the backing store; handler bodies
+stay identical.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from fastapi import APIRouter, Depends, HTTPException
 
-from fastapi import APIRouter, HTTPException, status
+from ...execution import InMemoryEngine
+from ...models import Prompt, PromptAuditEntry, PromptUpdate
+from ._deps import get_engine
 
 router = APIRouter()
 
 
-def _not_implemented(route: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"{route} is not yet activated in nexus-ai-engine. Ports land in phase 5.",
-    )
-
-
-@router.get("")
-async def list_prompts() -> dict:
-    raise _not_implemented("GET /")
+@router.get("", response_model=list[Prompt])
+async def list_prompts(engine: InMemoryEngine = Depends(get_engine)) -> list[Prompt]:
+    return await engine.list_prompts()
 
 
 @router.get("/types")
-async def prompt_types() -> dict:
-    raise _not_implemented("GET /types")
+async def prompt_types(engine: InMemoryEngine = Depends(get_engine)) -> dict:
+    return {"types": await engine.list_prompt_types()}
 
 
-@router.get("/{prompt_id}")
-async def get_prompt(prompt_id: str) -> dict:
-    raise _not_implemented("GET /{prompt_id}")
+@router.get("/{prompt_id}", response_model=Prompt)
+async def get_prompt(prompt_id: str, engine: InMemoryEngine = Depends(get_engine)) -> Prompt:
+    p = await engine.get_prompt(prompt_id)
+    if not p:
+        raise HTTPException(status_code=404, detail=f"Prompt {prompt_id} not found")
+    return p
 
 
-@router.put("/{prompt_id}")
-async def update_prompt(prompt_id: str, payload: dict[str, Any]) -> dict:
-    raise _not_implemented("PUT /{prompt_id}")
+@router.put("/{prompt_id}", response_model=Prompt)
+async def update_prompt(
+    prompt_id: str, body: PromptUpdate, engine: InMemoryEngine = Depends(get_engine)
+) -> Prompt:
+    p = await engine.update_prompt(prompt_id, body)
+    if not p:
+        raise HTTPException(status_code=404, detail=f"Prompt {prompt_id} not found")
+    return p
 
 
-@router.post("/reset")
-async def reset_prompts() -> dict:
-    raise _not_implemented("POST /reset")
+@router.post("/reset", response_model=list[Prompt])
+async def reset_prompts(engine: InMemoryEngine = Depends(get_engine)) -> list[Prompt]:
+    return await engine.reset_prompts()
 
 
-@router.get("/audit/log")
-async def audit_log() -> dict:
-    raise _not_implemented("GET /audit/log")
+@router.get("/audit/log", response_model=list[PromptAuditEntry])
+async def audit_log(
+    limit: int = 100, engine: InMemoryEngine = Depends(get_engine)
+) -> list[PromptAuditEntry]:
+    return await engine.prompt_audit_log(limit=limit)

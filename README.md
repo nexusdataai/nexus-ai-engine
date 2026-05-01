@@ -80,10 +80,43 @@ Or docker-compose:
 make compose-up
 ```
 
-Routes return 501 until their owning phase of the extraction plan ports the
-underlying service. See [docs/ROUTE_PARITY.md](docs/ROUTE_PARITY.md) for the
-full inventory and phase mapping. Health, readiness, and version endpoints
-are live today.
+Health/readiness/version plus the journey/job/logs/reports/prompts/schedules
+routes are all live against an in-memory engine, so the reference server is
+exercisable end-to-end today. See [docs/ROUTE_PARITY.md](docs/ROUTE_PARITY.md)
+for the canonical surface; handlers will swap their backing repository to
+DynamoDB in phase 10 without changing the router contract.
+
+## Embedded journey studio UI
+
+The reference server ships a small React UI bundled inside the Python
+package. Open it with `kubectl port-forward` — no ingress, no auth, no
+build tooling:
+
+```bash
+# Local dev
+make serve
+open http://localhost:8001/ui
+
+# Deployed pod
+kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000
+open http://localhost:8000/ui
+```
+
+What you can do:
+
+- Browse the 5 seeded journeys (order-to-cash, call-processing,
+  demand-forecasting, inventory-optimization, supply-chain-risk) with
+  search, filters, and per-journey KPIs.
+- Open a **Journey Studio** to view stages + steps and click
+  **Start Processing** to kick off a simulated job; live progress streams
+  via SSE into a logs drawer.
+- Inspect job history, **Cancel** running jobs, **Retry** failed ones.
+- Manage **Batch Schedules** — create, toggle, delete, Run Now.
+- Edit the **prompts catalog** with a version-history audit log and a
+  one-click reset to defaults.
+
+See [docs/UI.md](docs/UI.md) for the architecture, component tree, and how
+to add pages or API routes.
 
 ## Integration guidelines
 

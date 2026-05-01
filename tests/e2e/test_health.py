@@ -32,14 +32,14 @@ async def test_version_endpoint(http_client) -> None:
 
 
 @pytest.mark.e2e
-async def test_journeys_list_is_501_until_phase_9(http_client) -> None:
+async def test_journeys_list_is_live(http_client) -> None:
     resp = await http_client.get("/api/v1/journeys/")
-    assert resp.status_code == 501
-    assert "phase 9" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
 
 
 @pytest.mark.e2e
-async def test_prompts_list_is_501_until_phase_5(http_client) -> None:
+async def test_prompts_list_is_live(http_client) -> None:
     resp = await http_client.get("/api/v1/prompts")
-    assert resp.status_code == 501
-    assert "phase 5" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)

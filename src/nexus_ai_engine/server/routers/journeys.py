@@ -1,6 +1,6 @@
-"""Journeys router (CRUD, stages, batch, clone, metrics).
+"""Journeys router — activated against the in-memory engine.
 
-PORT FIDELITY CHECKLIST — do not simplify when porting.
+PORT FIDELITY CHECKLIST — do not simplify when porting the DynamoDB adapter.
 Source: /opt/mycode/nexus/nexus-backend/src/apis/journey_api.py
 
     POST   /                                         lines 156-202   (create_journey)
@@ -17,89 +17,145 @@ Source: /opt/mycode/nexus/nexus-backend/src/apis/journey_api.py
     PUT    /{journey_id}/stages/{stage_id}           lines 766-827   (update_stage)
     DELETE /{journey_id}/stages/{stage_id}           lines 828-865   (delete_stage)
 
-Every fix, optimization, retry, caching, decimal conversion, error path, and
-edge case in the source must be preserved verbatim during the phase port.
-Routes activate in phase 9 of the extraction plan; until then they return 501.
-
-See docs/ROUTE_PARITY.md for the full rules.
+Current status: activated against an in-memory engine to support the embedded
+UI and e2e tests. Swapping the backing repository to DynamoDB in phase 10
+changes the service injection, not the handler bodies.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from ...execution import InMemoryEngine
+from ...models import Journey, JourneyCreate, JourneyUpdate, Stage
+from ._deps import get_engine
 
 router = APIRouter()
 
 
-def _not_implemented(route: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail=f"{route} is not yet activated in nexus-ai-engine. Ports land in phase 9.",
-    )
+@router.post("/", response_model=Journey, status_code=status.HTTP_201_CREATED)
+async def create_journey(body: JourneyCreate, engine: InMemoryEngine = Depends(get_engine)) -> Journey:
+    return await engine.create_journey(body)
 
 
-@router.post("/")
-async def create_journey(payload: dict[str, Any]) -> dict:
-    raise _not_implemented("POST /")
+@router.get("/", response_model=list[Journey])
+async def list_journeys(
+    q: str | None = None,
+    status_filter: str | None = None,
+    capability: str | None = None,
+    limit: int | None = None,
+    engine: InMemoryEngine = Depends(get_engine),
+) -> list[Journey]:
+    return await engine.list_journeys(query=q, status=status_filter, capability=capability, limit=limit)
 
 
-@router.get("/")
-async def list_journeys() -> dict:
-    raise _not_implemented("GET /")
-
-
-@router.get("/{journey_id}")
-async def get_journey(journey_id: str) -> dict:
-    raise _not_implemented("GET /{journey_id}")
+@router.get("/{journey_id}", response_model=Journey)
+async def get_journey(journey_id: str, engine: InMemoryEngine = Depends(get_engine)) -> Journey:
+    j = await engine.get_journey(journey_id)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return j
 
 
 @router.get("/{journey_id}/status")
-async def get_journey_status(journey_id: str) -> dict:
-    raise _not_implemented("GET /{journey_id}/status")
-
-
-@router.delete("/{journey_id}")
-async def delete_journey(journey_id: str) -> dict:
-    raise _not_implemented("DELETE /{journey_id}")
-
-
-@router.post("/batch")
-async def batch_op(payload: dict[str, Any]) -> dict:
-    raise _not_implemented("POST /batch")
-
-
-@router.post("/{journey_id}/execute")
-async def execute_journey(journey_id: str, payload: dict[str, Any]) -> dict:
-    raise _not_implemented("POST /{journey_id}/execute")
+async def get_journey_status(journey_id: str, engine: InMemoryEngine = Depends(get_engine)) -> dict[str, Any]:
+    j = await engine.get_journey(journey_id)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return {
+        "journeyId": j.id,
+        "status": j.status.value,
+        "jobsTotal": j.jobs_total,
+        "jobsDone": j.jobs_done,
+        "jobsRunning": j.jobs_running,
+        "jobsFailed": j.jobs_failed,
+        "successRate": j.success_rate,
+        "avgDurationSeconds": j.avg_duration_seconds,
+        "updatedAt": j.updated_at.isoformat(),
+    }
 
 
 @router.get("/{journey_id}/metrics")
-async def journey_metrics(journey_id: str) -> dict:
-    raise _not_implemented("GET /{journey_id}/metrics")
+async def journey_metrics(journey_id: str, engine: InMemoryEngine = Depends(get_engine)) -> dict[str, Any]:
+    j = await engine.get_journey(journey_id)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return {
+        "journeyId": j.id,
+        "name": j.name,
+        "jobsTotal": j.jobs_total,
+        "jobsDone": j.jobs_done,
+        "jobsFailed": j.jobs_failed,
+        "jobsRunning": j.jobs_running,
+        "successRate": j.success_rate,
+        "avgDurationSeconds": j.avg_duration_seconds,
+    }
 
 
-@router.post("/{journey_id}/clone")
-async def clone_journey(journey_id: str, payload: dict[str, Any]) -> dict:
-    raise _not_implemented("POST /{journey_id}/clone")
+@router.delete("/{journey_id}")
+async def delete_journey(journey_id: str, engine: InMemoryEngine = Depends(get_engine)) -> dict[str, Any]:
+    ok = await engine.delete_journey(journey_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return {"deleted": journey_id}
 
 
-@router.get("/{journey_id}/stages")
-async def list_stages(journey_id: str) -> dict:
-    raise _not_implemented("GET /{journey_id}/stages")
+@router.patch("/{journey_id}", response_model=Journey)
+async def update_journey(
+    journey_id: str, body: JourneyUpdate, engine: InMemoryEngine = Depends(get_engine)
+) -> Journey:
+    j = await engine.update_journey(journey_id, body)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return j
 
 
-@router.post("/{journey_id}/stages")
-async def add_stage(journey_id: str, payload: dict[str, Any]) -> dict:
-    raise _not_implemented("POST /{journey_id}/stages")
+@router.post("/{journey_id}/clone", response_model=Journey, status_code=status.HTTP_201_CREATED)
+async def clone_journey(
+    journey_id: str, body: dict[str, Any] | None = None, engine: InMemoryEngine = Depends(get_engine)
+) -> Journey:
+    new_name = (body or {}).get("name")
+    clone = await engine.clone_journey(journey_id, new_name=new_name)
+    if not clone:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return clone
 
 
-@router.put("/{journey_id}/stages/{stage_id}")
-async def update_stage(journey_id: str, stage_id: str, payload: dict[str, Any]) -> dict:
-    raise _not_implemented("PUT /{journey_id}/stages/{stage_id}")
+@router.get("/{journey_id}/stages", response_model=list[Stage])
+async def list_stages(journey_id: str, engine: InMemoryEngine = Depends(get_engine)) -> list[Stage]:
+    j = await engine.get_journey(journey_id)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return list(j.stages)
 
 
-@router.delete("/{journey_id}/stages/{stage_id}")
-async def delete_stage(journey_id: str, stage_id: str) -> dict:
-    raise _not_implemented("DELETE /{journey_id}/stages/{stage_id}")
+@router.post("/{journey_id}/stages", response_model=Journey, status_code=status.HTTP_201_CREATED)
+async def add_stage(
+    journey_id: str, stage: Stage, engine: InMemoryEngine = Depends(get_engine)
+) -> Journey:
+    j = await engine.add_stage(journey_id, stage)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
+    return j
+
+
+@router.put("/{journey_id}/stages/{stage_id}", response_model=Journey)
+async def update_stage(
+    journey_id: str, stage_id: str, stage: Stage, engine: InMemoryEngine = Depends(get_engine)
+) -> Journey:
+    j = await engine.update_stage(journey_id, stage_id, stage)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} or stage {stage_id} not found")
+    return j
+
+
+@router.delete("/{journey_id}/stages/{stage_id}", response_model=Journey)
+async def delete_stage(
+    journey_id: str, stage_id: str, engine: InMemoryEngine = Depends(get_engine)
+) -> Journey:
+    j = await engine.delete_stage(journey_id, stage_id)
+    if not j:
+        raise HTTPException(status_code=404, detail=f"Journey {journey_id} or stage {stage_id} not found")
+    return j

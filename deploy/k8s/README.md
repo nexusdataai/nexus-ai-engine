@@ -96,7 +96,20 @@ kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000 &
 curl -fsS http://localhost:8000/health
 curl -fsS http://localhost:8000/readiness
 curl -fsS http://localhost:8000/version
+curl -fsS http://localhost:8000/api/v1/journeys/ | head -c 200
 ```
+
+## Embedded UI (port-forward)
+
+The pod ships a small React UI for browsing journeys, jobs, schedules, and
+prompts. Open it from your laptop with:
+
+```bash
+kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000
+```
+
+Then visit `http://localhost:8000/ui` in a browser. See
+[docs/UI.md](../../docs/UI.md) for the full feature list and architecture.
 
 ## Run tests inside the pod
 

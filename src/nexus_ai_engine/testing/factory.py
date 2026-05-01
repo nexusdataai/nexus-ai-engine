@@ -5,17 +5,14 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from ..config import EngineConfig
+from ..execution import InMemoryEngine
 
 
-def make_test_engine(**overrides: Any) -> Optional[Any]:
-    """Build an engine suitable for tests.
+def make_test_engine(*, seed_demo: bool = True, **overrides: Any) -> InMemoryEngine:
+    """Build an engine suitable for tests. Wraps :func:`build_engine`."""
+    from ..factory import build_engine
 
-    Returns ``None`` today because ``build_engine`` is a scaffold placeholder.
-    Starting in phase 3 of the extraction plan this returns a fully-wired
-    Engine with in-memory adapters by default. Test fixtures tolerate the
-    ``None`` return and assert on 501 / 503 behavior meanwhile.
-    """
-    config = EngineConfig(
+    _ = EngineConfig(
         region="us-east-1",
         dynamodb_transformation_table="test-transformation",
         dynamodb_prompts_table="test-prompts",
@@ -24,24 +21,15 @@ def make_test_engine(**overrides: Any) -> Optional[Any]:
         max_concurrent_jobs=overrides.pop("max_concurrent_jobs", 4),
         extras=overrides,
     )
-
-    try:
-        from ..factory import build_engine
-
-        return build_engine(config)
-    except NotImplementedError:
-        return None
+    return build_engine(_, seed_demo=seed_demo)
 
 
-def make_test_app(engine: Optional[Any] = None):
-    """Return a FastAPI app configured for in-process testing.
-
-    Creates an engine via :func:`make_test_engine` when none is supplied.
-    """
+def make_test_app(engine: Optional[Any] = None, *, seed_demo: bool = True):
+    """Return a FastAPI app configured for in-process testing."""
     from ..server.app import create_app
 
     if engine is None:
-        engine = make_test_engine()
+        engine = make_test_engine(seed_demo=seed_demo)
     return create_app(engine=engine)
 
 

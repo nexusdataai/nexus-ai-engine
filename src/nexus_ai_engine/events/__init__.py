@@ -1,4 +1,7 @@
-"""SSE manager and EventSink implementations.
+"""Event streaming primitives (SSE)."""
 
-Populated in Phase 4 of the extraction plan.
-"""
+from __future__ import annotations
+
+from .sse import SSEManager, emit
+
+__all__ = ["SSEManager", "emit"]

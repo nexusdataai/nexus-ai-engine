@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag or branch to build'
+        required: true
+        default: 'main'
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Verify distribution metadata
+        run: twine check dist/*
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ai-engine-${{ github.ref_name }}
+          path: dist/
+          retention-days: 90
+
+      # Internal index publish step — enable once the index URL + credentials
+      # are wired through repository secrets (e.g. INTERNAL_PYPI_URL,
+      # INTERNAL_PYPI_TOKEN). Left disabled to avoid accidental publishes.
+      #
+      # - name: Publish to internal index
+      #   env:
+      #     TWINE_USERNAME: __token__
+      #     TWINE_PASSWORD: ${{ secrets.INTERNAL_PYPI_TOKEN }}
+      #     TWINE_REPOSITORY_URL: ${{ secrets.INTERNAL_PYPI_URL }}
+      #   run: twine upload dist/*

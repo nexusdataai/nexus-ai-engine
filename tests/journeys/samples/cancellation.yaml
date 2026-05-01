@@ -1,0 +1,29 @@
+name: cancellation-journey
+description: |
+  Journey designed to exercise cooperative cancellation. A long-running step
+  periodically checks ``is_cancelled`` and exits gracefully when the executor
+  flips the job to ``cancelled``. Phase 7 activates the actual cancellation
+  flow; this file is validated by the YAML runner today.
+
+stage:
+  id: long-running-stage
+  name: Long-running Stage
+  description: Simulates a step that may be cancelled mid-execution.
+  steps:
+    - id: pre
+      name: Pre-work
+      type: tool
+      tool: noop
+
+    - id: long-running
+      name: Long-running work
+      type: tool
+      tool: sleep
+      input:
+        seconds: 60
+        check_cancellation_every_seconds: 1
+
+    - id: post
+      name: Post-work (should not run if cancelled)
+      type: tool
+      tool: noop

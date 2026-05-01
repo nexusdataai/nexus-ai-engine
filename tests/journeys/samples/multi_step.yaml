@@ -1,0 +1,33 @@
+name: multi-step-journey
+description: |
+  Three-step plugin-journey exercising sequential tool invocations with
+  context passing between steps.
+
+stage:
+  id: pipeline-stage
+  name: Multi-step Pipeline
+  description: Extract -> Transform -> Load using tool steps.
+  steps:
+    - id: extract
+      name: Extract
+      type: tool
+      tool: fetch_dataset
+      input:
+        source: in_memory_sample
+        limit: 10
+
+    - id: transform
+      name: Transform
+      type: tool
+      tool: apply_mapping
+      input:
+        mapping: default
+        from_step: extract
+
+    - id: load
+      name: Load
+      type: tool
+      tool: write_results
+      input:
+        sink: in_memory
+        from_step: transform

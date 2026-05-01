@@ -12,7 +12,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  quality:
+    name: Quality gate (${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -29,37 +30,104 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
 
-      - name: Install package with dev extras
+      - name: Install package with all extras
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,aws,test]"
+          pip install -e ".[dev,aws,test,server,harness]"
+
+      - name: Guardrail (forbidden imports)
+        # Only rejects actual `from src.*` / `import src.*` / `from nexus_backend.*` /
+        # `import nexus_backend.*` lines. Documentation comments that cite nexus-backend
+        # source files (see docs/ROUTE_PARITY.md and the router parity headers) are
+        # intentional and allowed.
+        run: make guardrail
 
       - name: Ruff lint
-        run: ruff check src tests
+        run: make lint
 
-      - name: Forbid internal imports of nexus-backend
-        run: |
-          set -e
-          if grep -RIn --include='*.py' -E '^\s*(from|import)\s+src(\.|\s)' src tests; then
-            echo "::error::Library must not import from 'src.*' (nexus-backend internal layout)."
-            exit 1
-          fi
-          if grep -RIn --include='*.py' -E 'nexus[_-]backend' src; then
-            echo "::error::Library must not reference nexus-backend."
-            exit 1
-          fi
+      - name: Mypy
+        run: make typecheck
+        continue-on-error: true  # tighten to false once phase 3 lands
 
-      - name: Run tests
-        run: pytest --cov=nexus_ai_engine --cov-report=term-missing
+      - name: Coverage (unit + integration + contract + property + e2e + journeys)
+        env:
+          COV_FAIL: '60'
+        run: make coverage
 
       - name: Build distribution
-        run: |
-          pip install build
-          python -m build
+        run: make build
 
-      - name: Upload build artifacts
+      - name: Upload coverage artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.python-version }}
+          name: coverage-${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            htmlcov/
+          retention-days: 14
+
+      - name: Upload build artifacts
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
           path: dist/
           retention-days: 7
+
+  bdd-and-endurance:
+    name: BDD + endurance smoke
+    runs-on: ubuntu-latest
+    needs: quality
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,aws,test,server,harness]"
+
+      - name: BDD
+        run: make test-bdd
+
+      - name: Endurance smoke
+        run: make test-endurance
+
+      - name: Upload BDD report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdd-report
+          path: reports/bdd.html
+          retention-days: 14
+
+  endurance-full:
+    name: Endurance (heavy) — nightly / manual only
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,aws,test,server,harness]"
+
+      - name: Run full endurance suite
+        run: make test-endurance-full

@@ -1,0 +1,16 @@
+name: hello-journey
+description: |
+  Minimal plugin-journey that runs a single no-op tool step. Used to verify
+  the JourneyYAMLRunner can parse and execute a trivially-valid journey.
+
+stage:
+  id: hello-stage
+  name: Hello Stage
+  description: A single-step stage that prints a greeting.
+  steps:
+    - id: say-hello
+      name: Say hello
+      type: tool
+      tool: echo
+      input:
+        message: "Hello from nexus-ai-engine!"

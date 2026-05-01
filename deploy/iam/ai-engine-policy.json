@@ -1,0 +1,202 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "DynamoDBAccess",
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:GetItem",
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:UpdateItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:DescribeTable",
+                "dynamodb:CreateTable",
+                "dynamodb:DeleteTable",
+                "dynamodb:UpdateTable",
+                "dynamodb:TagResource",
+                "dynamodb:ListTables"
+            ],
+            "Resource": [
+                "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-journeys-*",
+                "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-journeys-*/index/*",
+                "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-prompts-*",
+                "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-prompts-*/index/*"
+            ]
+        },
+        {
+            "Sid": "S3Access",
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:ListBucket",
+                "s3:DeleteObject",
+                "s3:GetBucketLocation",
+                "s3:CreateBucket",
+                "s3:PutBucketPolicy",
+                "s3:PutBucketTagging",
+                "s3:PutBucketVersioning",
+                "s3:PutBucketPublicAccessBlock",
+                "s3:PutBucketEncryption"
+            ],
+            "Resource": [
+                "arn:aws:s3:::ai-engine-journeys-*",
+                "arn:aws:s3:::ai-engine-journeys-*/*",
+                "arn:aws:s3:::ai-engine-*",
+                "arn:aws:s3:::ai-engine-*/*"
+            ]
+        },
+        {
+            "Sid": "SSMAccess",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters",
+                "ssm:GetParametersByPath",
+                "ssm:PutParameter",
+                "ssm:DeleteParameter",
+                "ssm:AddTagsToResource"
+            ],
+            "Resource": "arn:aws:ssm:${REGION}:${ACCOUNT_ID}:parameter/ai-engine/*"
+        },
+        {
+            "Sid": "SecretsAccess",
+            "Effect": "Allow",
+            "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:DescribeSecret",
+                "secretsmanager:PutSecretValue",
+                "secretsmanager:UpdateSecret",
+                "secretsmanager:CreateSecret",
+                "secretsmanager:DeleteSecret",
+                "secretsmanager:TagResource",
+                "secretsmanager:ListSecrets"
+            ],
+            "Resource": [
+                "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:ai-engine/*",
+                "arn:aws:secretsmanager:${REGION}:${ACCOUNT_ID}:secret:ai-engine-*"
+            ]
+        },
+        {
+            "Sid": "GlueAccess",
+            "Effect": "Allow",
+            "Action": [
+                "glue:GetDatabase",
+                "glue:GetDatabases",
+                "glue:CreateDatabase",
+                "glue:DeleteDatabase",
+                "glue:GetTable",
+                "glue:GetTables",
+                "glue:CreateTable",
+                "glue:UpdateTable",
+                "glue:DeleteTable",
+                "glue:GetPartition",
+                "glue:GetPartitions",
+                "glue:BatchGetPartition",
+                "glue:CreatePartition",
+                "glue:BatchCreatePartition",
+                "glue:UpdatePartition",
+                "glue:DeletePartition"
+            ],
+            "Resource": [
+                "arn:aws:glue:${REGION}:${ACCOUNT_ID}:catalog",
+                "arn:aws:glue:${REGION}:${ACCOUNT_ID}:database/ai-engine*",
+                "arn:aws:glue:${REGION}:${ACCOUNT_ID}:database/ai_engine*",
+                "arn:aws:glue:${REGION}:${ACCOUNT_ID}:table/ai-engine*/*",
+                "arn:aws:glue:${REGION}:${ACCOUNT_ID}:table/ai_engine*/*"
+            ]
+        },
+        {
+            "Sid": "AthenaAccess",
+            "Effect": "Allow",
+            "Action": [
+                "athena:StartQueryExecution",
+                "athena:GetQueryExecution",
+                "athena:GetQueryResults",
+                "athena:StopQueryExecution",
+                "athena:GetWorkGroup"
+            ],
+            "Resource": "arn:aws:athena:${REGION}:${ACCOUNT_ID}:workgroup/*"
+        },
+        {
+            "Sid": "CognitoAccess",
+            "Effect": "Allow",
+            "Action": [
+                "cognito-idp:AdminInitiateAuth",
+                "cognito-idp:AdminRespondToAuthChallenge",
+                "cognito-idp:AdminGetUser",
+                "cognito-idp:AdminSetUserPassword",
+                "cognito-idp:AdminCreateUser",
+                "cognito-idp:AdminDeleteUser",
+                "cognito-idp:AdminAddUserToGroup",
+                "cognito-idp:AdminRemoveUserFromGroup",
+                "cognito-idp:AdminListGroupsForUser",
+                "cognito-idp:ListUsers",
+                "cognito-idp:ListUsersInGroup",
+                "cognito-idp:DescribeUserPool",
+                "cognito-idp:DescribeUserPoolClient",
+                "cognito-idp:GetUser",
+                "cognito-idp:AssociateSoftwareToken",
+                "cognito-idp:VerifySoftwareToken",
+                "cognito-idp:SetUserMFAPreference",
+                "cognito-idp:AdminUserGlobalSignOut"
+            ],
+            "Resource": "arn:aws:cognito-idp:${REGION}:${ACCOUNT_ID}:userpool/*"
+        },
+        {
+            "Sid": "CloudWatchLogsAccess",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogGroups",
+                "logs:DescribeLogStreams",
+                "logs:PutRetentionPolicy"
+            ],
+            "Resource": "arn:aws:logs:${REGION}:${ACCOUNT_ID}:log-group:*"
+        },
+        {
+            "Sid": "SESAccess",
+            "Effect": "Allow",
+            "Action": [
+                "ses:SendEmail"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "CloudWatchMetricsAccess",
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:PutMetricData"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "STSAccess",
+            "Effect": "Allow",
+            "Action": [
+                "sts:GetCallerIdentity",
+                "sts:AssumeRole"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "ECRPullAccess",
+            "Effect": "Allow",
+            "Action": [
+                "ecr:GetAuthorizationToken",
+                "ecr:BatchCheckLayerAvailability",
+                "ecr:GetDownloadUrlForLayer",
+                "ecr:BatchGetImage",
+                "ecr:DescribeRepositories",
+                "ecr:DescribeImages"
+            ],
+            "Resource": "*"
+        }
+    ]
+}

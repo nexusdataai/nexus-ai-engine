@@ -1,5 +1,9 @@
 name: Deploy reference server to EKS
 
+# Wraps deploy/deploy-and-test.sh for CI-driven deploys.
+# Reuses nexus-backend's AWS infra: AWS_ROLE_TO_ASSUME_DEV, region us-east-1,
+# default cluster `nexus-dev`. Deploys into the new namespace `ai-engine`.
+
 on:
   workflow_dispatch:
     inputs:
@@ -14,9 +18,19 @@ on:
         required: false
         type: string
       image_tag:
-        description: "Image tag to deploy (defaults to the commit SHA; use 'latest' to redeploy)"
+        description: "Image tag to deploy (defaults to <commit-sha>-test). Use 'latest-test' to redeploy."
         required: false
         type: string
+      tests:
+        description: "Comma-separated test tiers to run in-pod (or 'none' to skip)"
+        required: false
+        default: 'unit,integration,contract,property,e2e,journeys,bdd,endurance'
+        type: string
+      skip_provision:
+        description: 'Skip AWS resource provisioning (DDB + S3)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   AWS_REGION: 'us-east-1'
@@ -39,7 +53,7 @@ jobs:
         run: |
           IMAGE_TAG="${{ inputs.image_tag }}"
           if [ -z "$IMAGE_TAG" ]; then
-            IMAGE_TAG="$(git rev-parse --short HEAD)"
+            IMAGE_TAG="$(git rev-parse --short HEAD)-test"
           fi
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "Using image tag: $IMAGE_TAG"
@@ -57,67 +71,57 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.IMAGE_NAME }}:latest
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.image_tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
       - name: Configure kubectl
         run: |
           CLUSTER="${{ inputs.cluster_name || vars.EKS_CLUSTER_NAME || 'nexus-dev' }}"
           aws eks update-kubeconfig --name "${CLUSTER}" --region ${{ env.AWS_REGION }}
           echo "CLUSTER=${CLUSTER}" >> "$GITHUB_ENV"
+          kubectl version --client
 
-      - name: Apply manifests
+      - name: Run deploy-and-test.sh
         env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
-          NAMESPACE: nexus-ai-engine-${{ inputs.environment }}
+          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
-          cd deploy/k8s
-          # Patch image reference + namespace at apply time so committed YAML stays generic
-          sed -i "s#REPLACE_WITH_ECR_REGISTRY#${REGISTRY}#g" kustomization.yaml deployment.yaml
-          sed -i "s/nexus-ai-engine-dev/${NAMESPACE}/g" namespace.yaml serviceaccount.yaml configmap.yaml deployment.yaml service.yaml hpa.yaml networkpolicy.yaml kustomization.yaml
-          kubectl apply -k .
-          kubectl -n "${NAMESPACE}" set image deploy/nexus-ai-engine server="${REGISTRY}/nexus-ai-engine:${IMAGE_TAG}"
-          kubectl -n "${NAMESPACE}" rollout status deploy/nexus-ai-engine --timeout=180s
+          chmod +x ./deploy/deploy-and-test.sh ./deploy/admin/setup-admin-role.sh
+          SKIP_PROVISION_FLAG=""
+          if [ "${{ inputs.skip_provision }}" = "true" ]; then
+            SKIP_PROVISION_FLAG="--skip-provision"
+          fi
+          ./deploy/deploy-and-test.sh \
+            --env "${{ inputs.environment }}" \
+            --region "${{ env.AWS_REGION }}" \
+            --cluster "${CLUSTER}" \
+            --ecr-registry "${{ steps.login-ecr.outputs.registry }}" \
+            --image-tag "${{ steps.tag.outputs.image_tag }}" \
+            --tests "${{ inputs.tests }}" \
+            $SKIP_PROVISION_FLAG
 
-      - name: Smoke test /health
-        env:
-          NAMESPACE: nexus-ai-engine-${{ inputs.environment }}
-        run: |
-          kubectl -n "${NAMESPACE}" port-forward svc/nexus-ai-engine 18000:8000 &
-          PF_PID=$!
-          sleep 4
-          set +e
-          curl -fsS http://localhost:18000/health
-          STATUS=$?
-          kill $PF_PID 2>/dev/null || true
-          exit $STATUS
+      - name: Upload BDD report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bdd-report-${{ inputs.environment }}
+          path: reports/bdd-${{ inputs.environment }}.html
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: Deployment summary
         if: always()
         env:
-          NAMESPACE: nexus-ai-engine-${{ inputs.environment }}
           IMAGE_TAG: ${{ steps.tag.outputs.image_tag }}
+          NAMESPACE: ai-engine
         run: |
-          echo "## nexus-ai-engine EKS Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "## nexus-ai-engine EKS Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Parameter | Value |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-----------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Environment | \`${{ inputs.environment }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Cluster | \`${CLUSTER}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Namespace | \`${NAMESPACE}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Image | \`${IMAGE_NAME}:${IMAGE_TAG}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Branch | \`${{ github.ref_name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Tests | \`${{ inputs.tests }}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "### Pod status" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          kubectl -n "${NAMESPACE}" get pods -l app.kubernetes.io/name=nexus-ai-engine >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          kubectl -n "${NAMESPACE}" get pods -l app.kubernetes.io/name=nexus-ai-engine 2>&1 >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"

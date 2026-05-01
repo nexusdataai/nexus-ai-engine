@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nexus-ai-engine
-  namespace: nexus-ai-engine-dev
+  namespace: ai-engine
   labels:
     app.kubernetes.io/name: nexus-ai-engine
 spec:

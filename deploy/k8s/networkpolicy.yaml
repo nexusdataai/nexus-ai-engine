@@ -1,11 +1,11 @@
-# Deny-all ingress by default, then explicitly allow from ingress controllers
-# and from pods in the same namespace. Adjust `podSelector`/namespace labels
-# per cluster convention before applying.
+# Deny-all ingress by default; allow from ingress controllers (kube-system)
+# and from pods in the same namespace. Adjust namespace selectors to match
+# your cluster's ingress controller convention before applying.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: nexus-ai-engine
-  namespace: nexus-ai-engine-dev
+  namespace: ai-engine
   labels:
     app.kubernetes.io/name: nexus-ai-engine
 spec:

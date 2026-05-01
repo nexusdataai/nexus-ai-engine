@@ -2,8 +2,11 @@
 .github
 .gitignore
 
-tests
-docs
+# Note: tests/, Makefile, tox.ini, scripts/, docs/ are intentionally NOT
+# excluded — they are required when building the test variant
+# (--build-arg INCLUDE_TEST_DEPS=true). The Dockerfile drops them in the
+# builder stage when INCLUDE_TEST_DEPS=false, so the production image
+# stays slim.
 
 .venv
 venv
@@ -27,7 +30,4 @@ dist
 build
 *.egg-info
 
-Makefile
-tox.ini
-scripts
 deploy

@@ -1,69 +1,118 @@
 # Kubernetes deployment — nexus-ai-engine
 
-This directory ships a minimal, production-shaped pod deployment for the
-reference server so the library can be exercised as an independent pod.
+Production-shaped manifests for deploying the reference server as an
+independent pod in EKS.
 
-## Quick apply
+## Conventions
+
+| What | Value |
+|------|-------|
+| Namespace                | `ai-engine` (single, fixed)                                       |
+| ServiceAccount           | `ai-engine-role-sa` (single, fixed)                               |
+| IAM role assumed via IRSA| `ai-engine-role` (created once by admin)                          |
+| DynamoDB table           | `ai-engine-journeys-${ENV}` (per env)                             |
+| S3 buckets               | `ai-engine-journeys-logs-${ENV}`, `ai-engine-journeys-reports-${ENV}` |
+| Image (production)       | `${ECR_REGISTRY}/nexus-ai-engine:<git-sha>` or `:latest`           |
+| Image (in-pod tests)     | `${ECR_REGISTRY}/nexus-ai-engine:<git-sha>-test` or `:latest-test` |
+
+## How to apply
+
+The recommended path is via the deploy script:
 
 ```bash
-# From repo root
-kubectl apply -k deploy/k8s/
-kubectl -n nexus-ai-engine-dev rollout status deploy/nexus-ai-engine
-kubectl -n nexus-ai-engine-dev port-forward svc/nexus-ai-engine 8000:8000
-curl -fsS http://localhost:8000/health
+cd /opt/mycode/nexus/nexus-ai-engine
+./deploy/deploy-and-test.sh --env dev --region us-east-1
 ```
 
-`make k8s-apply` and `make k8s-smoke` wrap the above.
+Direct apply (advanced):
 
-## What you need before a real cluster apply
+```bash
+# Substitute placeholders, then apply
+ENV=dev
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.us-east-1.amazonaws.com
+IMAGE_TAG=$(git rev-parse --short HEAD)
 
-All of the following reuse nexus-backend's existing AWS account and EKS
-cluster. Nothing below is provisioned by this repo; coordinate with the
-nexus-deployer team.
+mkdir -p /tmp/ai-engine-k8s
+cp deploy/k8s/*.yaml /tmp/ai-engine-k8s/
+sed -i "s|\${ENV}|${ENV}|g; \
+        s|\${REGION}|us-east-1|g; \
+        s|REPLACE_WITH_ECR_REGISTRY|${ECR_REGISTRY}|g; \
+        s|REPLACE_WITH_IAM_ROLE_ARN|arn:aws:iam::${ACCOUNT_ID}:role/ai-engine-role|g" \
+    /tmp/ai-engine-k8s/*.yaml
 
-### AWS
+kubectl apply -k /tmp/ai-engine-k8s/
+kubectl -n ai-engine rollout status deploy/nexus-ai-engine
+```
 
-1. **ECR repository** — `nexus-ai-engine` (distinct from nexus-backend's
-   `ai-job-engine`). One-time:
-   ```bash
-   aws ecr create-repository --repository-name nexus-ai-engine --image-scanning-configuration scanOnPush=true
-   ```
-2. **IAM role for IRSA** — the pod needs DynamoDB + S3 permissions matching
-   the scope of the routes it serves. For the extraction's early phases
-   (1–4) the 501 stubs do not need AWS access at all; leave the placeholder.
-   Starting in phase 5 wire the role ARN into
-   `serviceaccount.yaml → metadata.annotations.eks.amazonaws.com/role-arn`.
-3. **IAM OIDC role for GitHub Actions** — reuse
-   `secrets.AWS_ROLE_TO_ASSUME_DEV` from nexus-backend's deploy workflow.
+## Prerequisite — admin-side setup (one time)
 
-### Kubernetes
+Before any deploy can succeed, an AWS administrator must run:
 
-- **Cluster:** `nexus-dev` (shared with nexus-backend). Namespace
-  `nexus-ai-engine-dev` is created by `namespace.yaml`.
-- **Ingress / ALB:** intentionally not included here. Add an overlay in
-  [nexus-deployer](https://github.com/nexusdataai/nexus-deployer) with the
-  cluster-specific ALB annotations, hostnames, and certificate ARNs.
-- **Image pull secret:** the cluster must already be configured with an
-  image pull credential for the ECR registry (IRSA for the node group or
-  `imagePullSecrets` on the service account).
+```bash
+./deploy/admin/setup-admin-role.sh --region <region>
+```
 
-### Secrets
+That creates:
 
-Non-secret values live in `configmap.yaml`. Secret values (API keys, role
-ARN overrides, etc.) belong in a separate Kubernetes Secret named
-`nexus-ai-engine-secrets`. Once present, uncomment the `secretRef` block
-under `envFrom` in `deployment.yaml`. Never commit secret values.
+- IAM role **`ai-engine-role`** with permissions on
+  `ai-engine-journeys-*`, `ai-engine-*` resources.
+- IAM trust policy that lets `system:serviceaccount:ai-engine:ai-engine-role-sa`
+  assume the role via IRSA.
+- VPC endpoints (s3, dynamodb, sts, ssm, ssm-messages, ec2, ecr.api,
+  ecr.dkr, secretsmanager, logs, cognito-idp, athena, glue, events, eks)
+  in the cluster's VPC so the pod can reach AWS services privately.
 
-## Placeholders you must replace
+See [../iam/README.md](../iam/README.md) for full admin instructions.
 
-Before `kubectl apply` against a real cluster:
+## What you must replace before applying
 
-| File | Placeholder | Replacement |
-|------|-------------|-------------|
-| `serviceaccount.yaml` | `REPLACE_WITH_IAM_ROLE_ARN` | The IAM role ARN assumed via IRSA |
-| `deployment.yaml`     | `REPLACE_WITH_ECR_REGISTRY` | e.g. `123456789012.dkr.ecr.us-east-1.amazonaws.com` |
-| `kustomization.yaml`  | `REPLACE_WITH_ECR_REGISTRY` | Same registry URI |
+| Placeholder | Replacement | Patched by |
+|-------------|-------------|------------|
+| `${ENV}`                       | `dev` / `stage` / `prod`                              | deploy-and-test.sh |
+| `${REGION}`                    | AWS region (e.g. `us-east-1`, `ap-southeast-1`)        | deploy-and-test.sh |
+| `REPLACE_WITH_ECR_REGISTRY`    | e.g. `123456789012.dkr.ecr.us-east-1.amazonaws.com`    | deploy-and-test.sh |
+| `REPLACE_WITH_IAM_ROLE_ARN`    | `arn:aws:iam::<account>:role/ai-engine-role`           | deploy-and-test.sh |
 
-The GitHub Actions deploy workflow (`.github/workflows/deploy-eks.yml`)
-patches these at deploy time using `kubectl set image` so committed YAML
-stays generic.
+## Files
+
+- [namespace.yaml](namespace.yaml) — creates `ai-engine` namespace.
+- [serviceaccount.yaml](serviceaccount.yaml) — `ai-engine-role-sa` with IRSA annotation placeholder.
+- [configmap.yaml](configmap.yaml) — non-secret EngineConfig values; `${ENV}` and `${REGION}` patched at apply time.
+- [deployment.yaml](deployment.yaml) — 2 replicas, probes on `/health` + `/readiness`, `readOnlyRootFilesystem`, drop ALL caps, topology spread; `tmp` and `reports` emptyDir volumes (the `reports` volume backs `make test-bdd` HTML output).
+- [service.yaml](service.yaml) — ClusterIP on port 8000.
+- [hpa.yaml](hpa.yaml) — CPU/memory autoscaler 2 → 10.
+- [networkpolicy.yaml](networkpolicy.yaml) — deny-all ingress, allow from kube-system + same-app pods.
+- [kustomization.yaml](kustomization.yaml) — wires everything together; `kubectl apply -k`.
+
+No Ingress is shipped — ALB annotations are environment-specific. Add an
+overlay in [nexus-deployer](../../../nexus-deployer/) per cluster.
+
+## Verify after deploy
+
+```bash
+kubectl -n ai-engine get all
+kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000 &
+curl -fsS http://localhost:8000/health
+curl -fsS http://localhost:8000/readiness
+curl -fsS http://localhost:8000/version
+```
+
+## Run tests inside the pod
+
+When deployed with the test image (`:<sha>-test`), every test tier is
+runnable via `kubectl exec`:
+
+```bash
+POD=$(kubectl -n ai-engine get pod -l app.kubernetes.io/name=nexus-ai-engine -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n ai-engine exec -it "$POD" -- make test-unit
+kubectl -n ai-engine exec -it "$POD" -- make test-integration
+kubectl -n ai-engine exec -it "$POD" -- make test-e2e
+kubectl -n ai-engine exec -it "$POD" -- make test-journeys
+kubectl -n ai-engine exec -it "$POD" -- make test-bdd
+kubectl -n ai-engine exec -it "$POD" -- make test-endurance
+```
+
+`./deploy/deploy-and-test.sh` runs all tiers in sequence and aggregates
+results — see its `--help` for options.

@@ -2,7 +2,7 @@ apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: nexus-ai-engine
-  namespace: nexus-ai-engine-dev
+  namespace: ai-engine
   labels:
     app.kubernetes.io/name: nexus-ai-engine
 spec:

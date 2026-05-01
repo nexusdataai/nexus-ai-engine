@@ -44,6 +44,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# Per-run output from deploy/deploy-and-test.sh (BDD HTML reports etc.)
+reports/
+
 # Virtual environments
 .env
 .venv

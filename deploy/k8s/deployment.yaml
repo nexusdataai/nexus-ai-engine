@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nexus-ai-engine
-  namespace: nexus-ai-engine-dev
+  namespace: ai-engine
   labels:
     app.kubernetes.io/name: nexus-ai-engine
     app.kubernetes.io/component: server
@@ -23,7 +23,7 @@ spec:
         app.kubernetes.io/name: nexus-ai-engine
         app.kubernetes.io/component: server
     spec:
-      serviceAccountName: nexus-ai-engine
+      serviceAccountName: ai-engine-role-sa
       terminationGracePeriodSeconds: 30
       securityContext:
         runAsNonRoot: true
@@ -39,8 +39,9 @@ spec:
               app.kubernetes.io/name: nexus-ai-engine
       containers:
         - name: server
-          # Replace registry with the ECR registry URI (reusing nexus-backend's
-          # AWS account). The deploy-eks workflow substitutes a git-SHA tag.
+          # Image reference is patched at apply time by deploy-and-test.sh.
+          # Production deploys use ${ECR_REGISTRY}/nexus-ai-engine:<tag>;
+          # in-pod test runs use ${ECR_REGISTRY}/nexus-ai-engine:<tag>-test.
           image: REPLACE_WITH_ECR_REGISTRY/nexus-ai-engine:latest
           imagePullPolicy: IfNotPresent
           ports:
@@ -84,6 +85,10 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: reports
+              mountPath: /app/reports
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: reports
           emptyDir: {}

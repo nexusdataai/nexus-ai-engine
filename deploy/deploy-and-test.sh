@@ -166,6 +166,21 @@ export AWS_PROFILE
 export AWS_REGION="$REGION"
 export AWS_DEFAULT_REGION="$REGION"
 
+# AWS SDK credential precedence puts AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY
+# / AWS_SESSION_TOKEN env vars ABOVE AWS_PROFILE. If the caller's shell has
+# stale credentials from a previous session, they silently override the
+# profile and you get "security token included in the request is invalid"
+# even though `aws sts get-caller-identity --profile <name>` works by hand.
+# When we have a profile to use, drop those env vars so the profile wins.
+if [ -n "$AWS_PROFILE" ]; then
+    for var in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_SECURITY_TOKEN; do
+        if [ -n "${!var:-}" ]; then
+            echo "   🧹 Unsetting stale $var (would override profile '$AWS_PROFILE')"
+            unset "$var"
+        fi
+    done
+fi
+
 echo "   AWS profile:  $AWS_PROFILE"
 echo "   AWS region:   $REGION"
 

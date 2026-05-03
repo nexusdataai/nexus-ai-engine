@@ -1,0 +1,42 @@
+name: report-generating
+description: |
+  Three-step stage where each step emits a Report artifact. Tests
+  launch the job and assert that list_job_reports returns 3 reports,
+  each tied to the correct step_id, and that the aggregate report for
+  the journey reflects the new jobs.
+
+stage:
+  id: reporting-stage
+  name: Report Pipeline
+  description: 3 x emit_report.
+  steps:
+    - id: summary
+      name: Generate Summary Report
+      type: tool
+      tool: emit_report
+      input:
+        title: Run Summary
+        summary: Pipeline run completed cleanly.
+        data:
+          section: overview
+          rows: 42
+
+    - id: metrics
+      name: Generate Metrics Report
+      type: tool
+      tool: emit_report
+      input:
+        title: Run Metrics
+        data:
+          p95_ms: 123
+          p99_ms: 456
+
+    - id: audit
+      name: Generate Audit Report
+      type: tool
+      tool: emit_report
+      input:
+        title: Audit Trail
+        summary: All writes reconciled against the source.
+        data:
+          checksum: sha256:abc123

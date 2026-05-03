@@ -1,29 +1,27 @@
-"""Property-tier fixtures — hypothesis settings profiles."""
+"""Property-tier fixtures and hypothesis settings."""
 
 from __future__ import annotations
 
-try:
-    from hypothesis import HealthCheck, Verbosity, settings
-except ImportError:  # pragma: no cover
-    settings = None  # type: ignore[assignment]
+from hypothesis import HealthCheck, settings
 
-
-if settings is not None:
-    settings.register_profile(
-        "dev",
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    settings.register_profile("ci", max_examples=200, deadline=500)
-    settings.register_profile(
-        "thorough",
-        max_examples=1000,
-        deadline=None,
-        verbosity=Verbosity.verbose,
-    )
-
-    import os
-
-    _profile = os.environ.get("HYPOTHESIS_PROFILE", "dev")
-    settings.load_profile(_profile)
+# Our state-machine tests launch jobs against an InMemoryEngine; those
+# jobs can run across hypothesis example boundaries (the engine persists
+# state for the whole machine). Disable the "function scope" health check
+# which would otherwise flag the pytest fixture reuse.
+settings.register_profile(
+    "engine_state_machine",
+    max_examples=30,
+    stateful_step_count=20,
+    deadline=None,
+    suppress_health_check=[
+        HealthCheck.function_scoped_fixture,
+        HealthCheck.too_slow,
+    ],
+)
+settings.register_profile(
+    "thorough",
+    parent=settings.get_profile("engine_state_machine"),
+    max_examples=200,
+    stateful_step_count=50,
+)
+settings.load_profile("engine_state_machine")

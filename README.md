@@ -594,12 +594,44 @@ secrets are required.
 
 ### Step 4 — Open the UI in your browser
 
+If you're running `kubectl` on the **same machine as your browser** (laptop
+desktop, for example):
+
 ```bash
 kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000
+# Forwarding from 127.0.0.1:8000 -> 8000
 ```
 
-Now open `http://localhost:8000/ui` in your browser. You land on the
-**Journeys** page showing 5 seeded journeys:
+Now open `http://localhost:8000/ui` in your browser.
+
+If you're running `kubectl` on a **remote jumpbox / EC2 / dev server** and
+want to browse from your laptop, `kubectl port-forward` binds to the
+loopback interface only by default, so `<host-ip>:8000` won't be
+reachable. Pick one of:
+
+```bash
+# A) SSH tunnel from your laptop (most secure — no external bind):
+ssh -L 8000:localhost:8000 <user>@<jumpbox>
+# Then on the jumpbox:
+kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000
+# On your laptop: open http://localhost:8000/ui
+
+# B) VS Code / Cursor remote — add port 8000 in the Ports panel;
+#    your IDE tunnels it to localhost automatically.
+
+# C) Bind the port-forward to all interfaces on the jumpbox
+#    (reachable from anyone who can reach the jumpbox on :8000):
+kubectl -n ai-engine port-forward --address 0.0.0.0 \
+        svc/nexus-ai-engine 8000:8000
+# Forwarding from 0.0.0.0:8000 -> 8000
+# Then on your laptop: open http://<jumpbox-ip>:8000/ui
+```
+
+Security note on option C: the UI + API have no auth. Only use `--address
+0.0.0.0` on a host whose security group / firewall limits inbound on
+port 8000 to trusted source IPs.
+
+You land on the **Journeys** page showing 5 seeded journeys:
 
 | Journey                       | Capability              |
 |-------------------------------|-------------------------|

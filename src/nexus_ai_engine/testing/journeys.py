@@ -134,6 +134,11 @@ class JourneyYAMLRunner:
                     "name": s.get("name") or f"Step {i+1}",
                     "description": s.get("description"),
                     "order": i + 1,
+                    # Preserve plugin-journey fields so the engine's
+                    # deterministic step-tool dispatch can see them.
+                    "type": s.get("type"),
+                    "tool": s.get("tool"),
+                    "input": s.get("input"),
                 }
                 for i, s in enumerate(steps)
             ],

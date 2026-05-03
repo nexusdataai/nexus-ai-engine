@@ -1,0 +1,33 @@
+name: failing-step
+description: |
+  Four-step stage where step 2 deterministically fails after 3 ticks.
+  Tests assert that the job ends in `failed` status, error_message is
+  populated, and steps 3 + 4 never transition to running.
+
+stage:
+  id: failing-stage
+  name: Pipeline with Mid-stage Failure
+  description: ok -> fail -> should-not-run -> should-not-run.
+  steps:
+    - id: ok
+      name: OK
+      type: tool
+      tool: noop
+
+    - id: boom
+      name: Deterministic Failure
+      type: tool
+      tool: fail_after
+      input:
+        n_ticks: 3
+        message: simulated downstream 500
+
+    - id: never-1
+      name: Never Runs 1
+      type: tool
+      tool: noop
+
+    - id: never-2
+      name: Never Runs 2
+      type: tool
+      tool: noop

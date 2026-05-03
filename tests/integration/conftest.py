@@ -1,89 +1,56 @@
-"""Integration-tier fixtures backed by moto mocks of AWS services.
+"""Integration-tier fixtures.
 
-Activates the shipped AWS adapters against moto 5's unified ``@mock_aws``
-context, so tests exercise the real DynamoDB/S3 client code without touching
-a real AWS account.
+These tests treat the InMemoryEngine as the integration target: real CRUD
+flows, real asyncio concurrency, deterministic step tools registered on
+the engine so assertions are stable.
+
+Moto-backed DynamoDB / S3 tests live under the same directory and
+activate once the adapter modules land (deferred in the plan).
 """
 
 from __future__ import annotations
 
-import os
-from typing import Iterator
+import asyncio
 
 import pytest
 
-
-@pytest.fixture
-def aws_credentials_env() -> Iterator[None]:
-    """Set dummy AWS credentials so boto3 does not read ~/.aws/credentials."""
-    keys = {
-        "AWS_ACCESS_KEY_ID": "testing",
-        "AWS_SECRET_ACCESS_KEY": "testing",
-        "AWS_SESSION_TOKEN": "testing",
-        "AWS_DEFAULT_REGION": "us-east-1",
-    }
-    previous = {k: os.environ.get(k) for k in keys}
-    os.environ.update(keys)
-    try:
-        yield
-    finally:
-        for k, v in previous.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
+from nexus_ai_engine.execution import InMemoryEngine, seed
+from tests.fixtures.steps import register_all
 
 
 @pytest.fixture
-def mock_aws_ctx(aws_credentials_env):
-    """Enter moto's unified AWS mock context for the duration of a test."""
-    try:
-        from moto import mock_aws
-    except ImportError:  # pragma: no cover - moto required for this tier
-        pytest.skip("moto is not installed; run `pip install nexus-ai-engine[test]`")
-    with mock_aws():
-        yield
+def engine() -> InMemoryEngine:
+    """Fresh in-memory engine, no seeded journeys, with all deterministic
+    step tools registered.
+    """
+    e = InMemoryEngine()
+    register_all(e)
+    return e
 
 
 @pytest.fixture
-def dynamodb_resource(mock_aws_ctx):
-    import boto3
-
-    return boto3.resource("dynamodb", region_name="us-east-1")
-
-
-@pytest.fixture
-def s3_client(mock_aws_ctx):
-    import boto3
-
-    return boto3.client("s3", region_name="us-east-1")
+def seeded_engine() -> InMemoryEngine:
+    """Engine with the 5 demo journeys seeded AND all deterministic tools
+    registered. The seeded journeys themselves don't declare `type: tool`
+    so they continue to use the random simulator.
+    """
+    e = InMemoryEngine()
+    seed(e)
+    register_all(e)
+    return e
 
 
-@pytest.fixture
-def transformation_table(dynamodb_resource):
-    table = dynamodb_resource.create_table(
-        TableName="test-transformation",
-        KeySchema=[
-            {"AttributeName": "PK", "KeyType": "HASH"},
-            {"AttributeName": "SK", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "PK", "AttributeType": "S"},
-            {"AttributeName": "SK", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
-    table.wait_until_exists()
-    return table
+async def wait_for_terminal(engine: InMemoryEngine, journey_id: str, job_id: str, *, timeout: float = 10.0) -> None:
+    """Block until the job reaches a terminal status or timeout expires.
 
-
-@pytest.fixture
-def logs_bucket(s3_client):
-    s3_client.create_bucket(Bucket="test-logs")
-    return "test-logs"
-
-
-@pytest.fixture
-def reports_bucket(s3_client):
-    s3_client.create_bucket(Bucket="test-reports")
-    return "test-reports"
+    Raises AssertionError on timeout so tests fail loud instead of hanging.
+    """
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        job = await engine.get_job(journey_id, job_id)
+        if job and job.status.value in ("completed", "failed", "cancelled"):
+            return
+        await asyncio.sleep(0.02)
+    job = await engine.get_job(journey_id, job_id)
+    status = job.status.value if job else "missing"
+    raise AssertionError(f"job {job_id} did not reach terminal within {timeout}s (status={status})")

@@ -25,14 +25,39 @@ scripts/test.sh coverage
 
 | Directory | What it covers | Typical runtime | Marker |
 |-----------|----------------|-----------------|--------|
-| `tests/unit/`        | Pure-Python logic: config, errors, factory stub, package structure | <2s   | none |
-| `tests/integration/` | Moto-backed AWS adapter behavior (DynamoDB, S3)                    | <60s  | `integration` |
-| `tests/contract/`    | Parametrized across adapters; same class runs against in-memory and moto | <60s | none |
-| `tests/property/`    | Hypothesis state-machine tests for job lifecycle, cancellation, etc | <60s | none |
-| `tests/e2e/`         | In-process `httpx.AsyncClient` against the FastAPI harness          | <30s | `e2e` |
-| `tests/bdd/`         | behave features + steps, hits the same in-process harness           | <2m  | `bdd` |
-| `tests/endurance/`   | Concurrent load smoke against the in-process harness                | <2m  | `heavy` opts out |
-| `tests/journeys/`    | Exercises plugin-journey YAMLs through `JourneyYAMLRunner`           | <5s  | none |
+| `tests/unit/`        | Pure-Python logic: config, errors, factory, in-memory engine, package structure | <2s   | none |
+| `tests/integration/` | Full-CRUD flows through the in-memory engine; multi-journey concurrency; cancel/retry paths. Moto-backed adapter tests activate once adapters land. | <2s  | `integration` (optional) |
+| `tests/contract/`    | Parametrized across adapter implementations; activates once adapters land. | <60s | none |
+| `tests/property/`    | Hypothesis state-machine tests: job lifecycle transitions, counter invariants, log ordering, cancellation idempotency, aggregate-report consistency. | ~15s | none |
+| `tests/e2e/`         | In-process `httpx.AsyncClient` against the FastAPI harness: full lifecycle, concurrent jobs, SSE streaming, cancel/retry, error paths, UI static. | ~20s | `e2e` |
+| `tests/bdd/`         | behave features + steps: health, journey lifecycle, concurrent jobs, cancellation, retry, failing steps. | <5s | `bdd` |
+| `tests/endurance/`   | Concurrent load smoke against the in-process engine: many-jobs-one-journey, many-jobs-many-journeys, log volume, sustained throughput, SSE fan-out, cancellation storm. | <5s default, <60s `--heavy` | `heavy` opts out |
+| `tests/journeys/`    | Exercises 10 plugin-journey YAML samples through `JourneyYAMLRunner`. | <5s | none |
+
+### Deterministic step tools
+
+Under `tests/fixtures/steps/` ships a small library of async step tools
+that are registered on the test engine via `register_all(engine)`. Any
+step whose Pydantic `Step` has `type="tool"` and a `tool` name from the
+registry uses deterministic dispatch instead of the lively random
+simulator. Journeys that don't declare `type: tool` on their steps
+(including the 5 seeded UI demo journeys) continue to run through the
+random simulator — zero regression for the embedded Journey Studio UI.
+
+The available tools:
+
+| Tool | Purpose |
+|------|---------|
+| `noop`              | Returns immediately — baseline concurrency tests |
+| `sleep`             | `input.seconds` cooperative sleep |
+| `count_to`          | Emit `input.n` log lines; log volume + ordering |
+| `fail_after`        | Raise `StepFailure` after `input.n_ticks` |
+| `flaky`             | Seeded pass/fail; always succeeds on retry |
+| `transform`         | Read/write ctx; identity/upper/double/reverse/count fns (data flow) |
+| `gather`            | Merge outputs of named prior steps |
+| `cancel_checkpoint` | Cooperative cancellation over `input.total_seconds` |
+| `emit_report`       | Create a `Report` artifact bound to job/step |
+| `cpu_spin`          | Off-loop busy-loop for event-loop fairness tests |
 
 Heavy endurance scenarios are tagged `@pytest.mark.heavy` and skipped by
 `make test-endurance`; run `make test-endurance-full` or trigger the nightly

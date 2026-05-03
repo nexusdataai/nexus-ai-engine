@@ -1,0 +1,19 @@
+name: log-heavy
+description: |
+  Single-step stage that emits 500 log lines at 0s delay. Tests assert
+  log retrieval returns all 500 in order and search works on them.
+  Used by the endurance tier for log-volume / search correctness.
+
+stage:
+  id: log-heavy-stage
+  name: Log Volume
+  description: One step emitting 500 INFO log lines.
+  steps:
+    - id: shout
+      name: Emit lots of logs
+      type: tool
+      tool: count_to
+      input:
+        n: 500
+        delay_seconds: 0
+        level: INFO

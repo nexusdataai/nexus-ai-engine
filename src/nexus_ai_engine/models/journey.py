@@ -35,6 +35,14 @@ class Step(BaseModel):
     name: str
     description: Optional[str] = None
     order: int = 0
+    # Optional plugin-journey fields. When set to `type="tool"` with a
+    # `tool` name registered on the engine's step_tools registry, the
+    # executor dispatches to that deterministic tool instead of running
+    # the random simulation. Unset on the 5 seeded demo journeys so the
+    # UI continues to use the lively random simulator.
+    type: Optional[str] = None
+    tool: Optional[str] = None
+    input: Optional[dict[str, Any]] = None
 
 
 class Stage(BaseModel):

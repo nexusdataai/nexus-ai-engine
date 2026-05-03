@@ -1,0 +1,21 @@
+name: flaky-retry
+description: |
+  Single-step stage using the `flaky` tool. The tool is seeded to fail
+  on the first attempt and succeed on retry. Tests launch the job,
+  observe failure, call /retry, and assert the retry completes.
+
+stage:
+  id: flaky-stage
+  name: Flaky Retry Demo
+  description: Deterministically fails once, then succeeds on retry.
+  steps:
+    - id: flaky-step
+      name: Flaky Step
+      type: tool
+      tool: flaky
+      input:
+        # seed + success_rate tuned so the base-rate path FAILS.
+        # On any trigger_reason starting with "retry" the tool returns ok.
+        seed: 1
+        success_rate: 0.0
+        succeed_on_retry: 1

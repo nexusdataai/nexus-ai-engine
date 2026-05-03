@@ -1,0 +1,195 @@
+# CloudFormation template - creates only the IAM role for GitHub Actions
+# Since GitHub OIDC provider already exists in your account
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'GitHub Actions IAM Role for StarHub Backend Deployments (OIDC provider already exists)'
+
+Parameters:
+  GitHubOrganization:
+    Type: String
+    Description: GitHub organization or username
+    Default: "trilogy-group"
+    
+  GitHubRepository:
+    Type: String
+    Description: GitHub repository name
+    Default: "starhub-backend"
+    
+  BranchName:
+    Type: String
+    Description: Branch that can deploy (dev, test, stage, main, etc.)
+    Default: "dev"
+
+Resources:
+  # IAM Role for GitHub Actions (OIDC provider already exists)
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "GitHubActions-${GitHubRepository}-${BranchName}"
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': sts.amazonaws.com
+              StringLike:
+                'token.actions.githubusercontent.com:sub': 
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/${BranchName}'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/main'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/dev'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/test'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/stage'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/dependabot/*'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:ref:refs/heads/release/*'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:pull/*'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:environment:production'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:environment:staging'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:environment:test'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:environment:development'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:environment:eks-dev'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:environment:eks-stage'
+                  - !Sub 'repo:${GitHubOrganization}/${GitHubRepository}:environment:eks-prod'
+      Policies:
+        - PolicyName: StarHubBackendDeploymentPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # ECR permissions for Docker image management
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+              
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeRepositories
+                  - ecr:DescribeImages
+                  - ecr:ListImages
+                Resource: 
+                  - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/ai-job-engine"
+                  - !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/call-processing-*"
+              
+              # EKS permissions for Kubernetes deployment
+              - Effect: Allow
+                Action:
+                  - eks:DescribeCluster
+                  - eks:ListClusters
+                Resource:
+                  - !Sub "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:cluster/starhub-*"
+
+              # ECS permissions for service deployment
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeClusters
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:DescribeTaskDefinition
+                  - ecs:RegisterTaskDefinition
+                  - ecs:ListServices
+                  - ecs:ListClusters
+                Resource: "*"
+              
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:StopTask
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                Resource:
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:cluster/call-processing-*"
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:service/call-processing-*/*"
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task/call-processing-*/*"
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/call-processing-*"
+              
+              # IAM PassRole for ECS task execution
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/call-processing-*"
+                Condition:
+                  StringEquals:
+                    'iam:PassedToService': 
+                      - ecs-tasks.amazonaws.com
+              
+              # S3 permissions for data and artifacts
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource: 
+                  - "arn:aws:s3:::call-processing-*"
+                  - "arn:aws:s3:::call-processing-*/*"
+              
+              # CloudWatch Logs for monitoring
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogGroups
+                  - logs:DescribeLogStreams
+                  - logs:GetLogEvents
+                  - logs:FilterLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/call-processing-*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/call-processing-*:*"
+              
+              # Secrets Manager for configuration secrets
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:DescribeSecret
+                Resource:
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:call-processing-*"
+                  - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:call-processing/*"
+              
+              # SSM Parameter Store for configuration
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/call-processing/*"
+              
+              # STS for identity verification
+              - Effect: Allow
+                Action:
+                  - sts:GetCallerIdentity
+                Resource: "*"
+
+Outputs:
+  GitHubActionsRoleArn:
+    Description: ARN of the GitHub Actions role to use in workflows
+    Value: !GetAtt GitHubActionsRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-GitHubActionsRoleArn"
+  
+  SetupInstructions:
+    Description: Instructions for completing the setup
+    Value: !Sub |
+      1. Add this ARN as a secret in your GitHub repository:
+         ${GitHubActionsRole.Arn}
+      
+      2. Go to: https://github.com/${GitHubOrganization}/${GitHubRepository}/settings/secrets/actions
+      
+      3. Add the following secrets based on environment:
+         - AWS_ROLE_TO_ASSUME_DEV: (role ARN for dev environment)
+         - AWS_ROLE_TO_ASSUME_TEST: (role ARN for test environment)
+         - AWS_ROLE_TO_ASSUME_STAGE: (role ARN for staging)
+         - AWS_ROLE_TO_ASSUME_PROD: (role ARN for production)

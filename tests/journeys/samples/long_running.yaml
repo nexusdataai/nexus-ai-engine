@@ -1,0 +1,70 @@
+name: long-running
+description: |
+  Stage with 10 sleep-based steps. Used by endurance tests to verify
+  that a long-running job can coexist with many other jobs running in
+  parallel without starving the event loop.
+
+stage:
+  id: long-running-stage
+  name: Long Running
+  description: 10 x sleep(0.2s) steps.
+  steps:
+    - id: slow-1
+      name: Sleep 1
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-2
+      name: Sleep 2
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-3
+      name: Sleep 3
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-4
+      name: Sleep 4
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-5
+      name: Sleep 5
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-6
+      name: Sleep 6
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-7
+      name: Sleep 7
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-8
+      name: Sleep 8
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-9
+      name: Sleep 9
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }
+
+    - id: slow-10
+      name: Sleep 10
+      type: tool
+      tool: sleep
+      input: { seconds: 0.2 }

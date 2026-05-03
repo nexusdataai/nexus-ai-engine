@@ -18,7 +18,7 @@ import uuid
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator
+from typing import Any, AsyncIterator, Awaitable, Callable
 
 from ..events import SSEManager, emit
 from ..models import (
@@ -50,6 +50,25 @@ from ..models import (
 logger = logging.getLogger(__name__)
 
 
+class StepFailure(Exception):
+    """Raised by a deterministic step tool to mark the step as failed.
+
+    The executor captures the message into `StepResult.error` and emits an
+    ERROR log entry before moving the job to its failed terminal state.
+    """
+
+
+# Signature of a deterministic step tool. Imported by tests and the
+# harness; not used by the shipped random simulation. The `is_cancelled`
+# keyword is a no-arg callable returning True once the job has been
+# marked for cancellation; tools that sleep for long periods should poll
+# it periodically so cancellation is cooperative.
+StepTool = Callable[
+    ["InMemoryEngine", "Job", "StepResult", "Step", dict[str, Any]],
+    Awaitable[None],
+]
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -79,6 +98,20 @@ class InMemoryEngine:
     _cancel_flags: set[str] = field(default_factory=set)
     _running_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     sse: SSEManager = field(default_factory=SSEManager)
+    # Optional registry of deterministic step tools. When a Step has
+    # `type="tool"` and a `tool` name that is registered here, the
+    # executor dispatches to the tool instead of running the random
+    # simulation. Production / UI-demo code leaves this empty, so the
+    # 5 seeded journeys continue to use the lively random simulator.
+    #
+    # Each tool is an async callable:
+    #     async def tool(engine, job, step, step_def, ctx, *, is_cancelled) -> None
+    # The tool is expected to update `step.progress`, append logs via
+    # `engine._append_log`, broadcast SSE events via `engine.sse.broadcast`,
+    # raise StepFailure(msg) to fail the step, or return normally to
+    # complete it. `ctx` is a shared dict passed between steps of the
+    # same job so steps can read each other's outputs.
+    step_tools: dict[str, "StepTool"] = field(default_factory=dict)
 
     # ── Journeys ────────────────────────────────────────────────────────
 
@@ -473,6 +506,20 @@ class InMemoryEngine:
             },
         )
 
+    # ── Deterministic step-tool registry ────────────────────────────────
+
+    def register_step_tool(self, name: str, tool: StepTool) -> None:
+        """Register a deterministic step tool.
+
+        Tests and the harness use this to plug in step implementations
+        that are invoked when a `Step` has `type="tool"` and `tool=<name>`.
+        """
+        self.step_tools[name] = tool
+
+    def is_cancelled(self, job_id: str) -> bool:
+        """Return True once `cancel_job` has been called for this job."""
+        return job_id in self._cancel_flags
+
     # ── Helpers ─────────────────────────────────────────────────────────
 
     def _update_journey_counters(
@@ -519,7 +566,17 @@ class InMemoryEngine:
         )
 
     async def _execute_simulated(self, job: Job) -> None:
-        """Simulate executing each step of the stage, emitting SSE events."""
+        """Execute each step of the stage.
+
+        Hybrid strategy:
+        - If a `Step` has `type="tool"` and `tool` matches a registered
+          deterministic tool, dispatch to that tool. Tools own their own
+          progress/logs/SSE emission and may raise `StepFailure` to fail.
+        - Otherwise fall back to the original random-tick simulator so
+          the shipped UI demo behaves exactly as before.
+
+        Both paths share the same terminal-state bookkeeping below.
+        """
         journey_id = job.journey_id
         started = job.started_at
         total_steps = len(job.step_results) or 1
@@ -527,13 +584,38 @@ class InMemoryEngine:
         errors = 0
         completed_ok = True
 
+        # Resolve the Stage.steps list so we can look up type/tool/input
+        # for each StepResult. Falls back to an empty list if the journey
+        # has been deleted mid-run.
+        stage_steps: list[Step] = []
+        src_journey = self.journeys.get(journey_id)
+        if src_journey:
+            src_stage = next(
+                (s for s in src_journey.stages if s.id == job.stage_id), None
+            )
+            if src_stage:
+                stage_steps = list(src_stage.steps)
+        step_def_by_id: dict[str, Step] = {s.id: s for s in stage_steps}
+
+        # Shared job-scope context passed between deterministic step tools.
+        # The random simulator ignores it.
+        ctx: dict[str, Any] = {}
+
         try:
             for idx, step in enumerate(job.step_results):
                 if job.id in self._cancel_flags:
                     completed_ok = False
                     break
 
-                # Step start
+                step_def = step_def_by_id.get(step.step_id)
+                tool_name = (
+                    step_def.tool
+                    if step_def is not None and step_def.type == "tool"
+                    else None
+                )
+                tool = self.step_tools.get(tool_name) if tool_name else None
+
+                # Step start (shared for both paths)
                 job.current_step_id = step.step_id
                 step.status = JobStatus.running
                 step.started_at = _now()
@@ -545,7 +627,46 @@ class InMemoryEngine:
                     message=f"Starting step {step.step_id}",
                 ))
 
-                # Simulated progress ticks
+                if tool is not None and step_def is not None:
+                    # ── Deterministic tool path ─────────────────────────
+                    try:
+                        await tool(self, job, step, step_def, ctx)
+                    except StepFailure as failure:
+                        step.status = JobStatus.failed
+                        step.ended_at = _now()
+                        step.error = str(failure) or "Step failed"
+                        errors += 1
+                        self._append_log(job.id, LogEntry(
+                            timestamp=_now(), level="ERROR", step_id=step.step_id,
+                            message=f"Step {step.step_id} failed: {step.error}",
+                        ))
+                        await self.sse.broadcast(
+                            emit("step_status", job.id, step.step_id, status="failed", error=step.error)
+                        )
+                        completed_ok = False
+                        break
+                    if job.id in self._cancel_flags:
+                        completed_ok = False
+                        break
+                    # Tool completed successfully; normalize step state.
+                    step.status = JobStatus.completed
+                    step.ended_at = _now()
+                    step.progress = 100
+                    # Advance whole-job progress proportionally.
+                    job.progress = int(((idx + 1) / total_steps) * 100)
+                    step.log_count = sum(
+                        1 for e in self.job_logs.get(job.id, []) if e.step_id == step.step_id
+                    )
+                    await self.sse.broadcast(
+                        emit("step_status", job.id, step.step_id, status="completed", progress=100)
+                    )
+                    self._append_log(job.id, LogEntry(
+                        timestamp=_now(), level="INFO", step_id=step.step_id,
+                        message=f"Completed step {step.step_id}",
+                    ))
+                    continue
+
+                # ── Random-simulation fallback (existing UI-demo behavior) ──
                 ticks = random.randint(4, 8)
                 for tick in range(1, ticks + 1):
                     if job.id in self._cancel_flags:

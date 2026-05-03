@@ -1,0 +1,37 @@
+name: data-pipeline
+description: |
+  Three-step extract -> transform -> load pipeline using deterministic
+  test tools. Each step reads from (and writes to) the shared job
+  context so tests can assert that data actually flowed end-to-end.
+
+stage:
+  id: etl-stage
+  name: ETL Pipeline
+  description: Extract a literal payload, transform, load (verify).
+  steps:
+    - id: extract
+      name: Extract
+      type: tool
+      tool: transform
+      input:
+        source: "hello nexus"
+        fn: identity
+        to_key: raw
+
+    - id: transform
+      name: Transform
+      type: tool
+      tool: transform
+      input:
+        from_key: raw
+        fn: upper
+        to_key: shouted
+
+    - id: load
+      name: Load
+      type: tool
+      tool: transform
+      input:
+        from_key: shouted
+        fn: count
+        to_key: char_count

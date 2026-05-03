@@ -1,0 +1,58 @@
+name: parallel-fanout
+description: |
+  Fan-out / fan-in shape: one extract step, three independent transform
+  steps (t1, t2, t3), one gather step that fans-in their outputs. The
+  engine today runs steps sequentially, so this YAML also exercises
+  that: t1 through t3 execute in order and gather waits for all three.
+  When a parallel-step execution mode lands (future phase), this same
+  YAML can be re-run against the parallel executor without schema
+  changes — the gather step is already correctly positioned.
+
+stage:
+  id: fanout-stage
+  name: Fan-out then Gather
+  description: 1 extract -> 3 transforms -> 1 gather.
+  steps:
+    - id: extract
+      name: Extract
+      type: tool
+      tool: transform
+      input:
+        source: "alpha"
+        fn: identity
+        to_key: src
+
+    - id: t1
+      name: Transform upper
+      type: tool
+      tool: transform
+      input:
+        from_key: src
+        fn: upper
+        to_key: t1_out
+
+    - id: t2
+      name: Transform reverse
+      type: tool
+      tool: transform
+      input:
+        from_key: src
+        fn: reverse
+        to_key: t2_out
+
+    - id: t3
+      name: Transform count
+      type: tool
+      tool: transform
+      input:
+        from_key: src
+        fn: count
+        to_key: t3_out
+
+    - id: gather
+      name: Gather all
+      type: tool
+      tool: gather
+      input:
+        from_keys: [t1_out, t2_out, t3_out]
+        to_key: merged

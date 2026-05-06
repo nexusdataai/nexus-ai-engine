@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-ai-engine"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Journey/stage/job AI orchestration engine extracted from nexus-backend. Port-based core with DynamoDB/S3 default adapters, a reference FastAPI/MCP server, and an importable testing harness."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,10 +27,18 @@ dependencies = [
     "pydantic>=2.10",
     "loguru>=0.7",
     "pyyaml>=6.0",
+    # boto3/botocore are required: the DynamoDB-backed services
+    # (JourneyService, PromptsService, SchedulerService,
+    # LogsAndReportsService) and the AWSClientManager + LocalStack
+    # adapters all import boto3 unconditionally.
+    "boto3>=1.38",
+    "botocore>=1.38",
 ]
 
 [project.optional-dependencies]
 aws = [
+    # Kept for backwards compatibility with consumers pinning the
+    # ``[aws]`` extra; boto3/botocore are now in the base install.
     "boto3>=1.38",
     "botocore>=1.38",
 ]

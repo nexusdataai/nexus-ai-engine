@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable
 
-from ..events import SSEManager, emit
+from ..events import SimpleSSEManager as SSEManager, emit
 from ..models import (
     AggregateReport,
     Job,

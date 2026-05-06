@@ -2,11 +2,15 @@
 
 The library never reads environment variables or SSM/Secrets by itself. Host
 applications build an ``EngineConfig`` from whichever source they prefer and
-pass it to ``nexus_ai_engine.factory.build_engine``.
+pass it to ``nexus_ai_engine.factory.build_engine``. The library exposes a
+process-wide singleton via ``set_config()`` / ``get_config()`` so that
+service modules ported from nexus-backend can keep their existing
+``from ..config import get_config`` import shape.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -31,4 +35,63 @@ class EngineConfig:
     max_concurrent_jobs: int = 10
     job_task_cleanup_interval_seconds: int = 60
 
+    capability_name: str = "call-processing"
+    environment: str = "dev"
+
     extras: dict = field(default_factory=dict)
+
+    @property
+    def aws_region(self) -> str:
+        """Alias for ``region`` with env-var fallback."""
+        return (
+            self.region
+            or os.getenv("AWS_REGION")
+            or os.getenv("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        )
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Process-wide singleton helpers
+# ────────────────────────────────────────────────────────────────────────────
+# Service code ported from nexus-backend uses ``from ..config import
+# get_config`` and then accesses fields like
+# ``config.dynamodb_transformation_table``. The host app wires its config
+# object via ``set_config()`` at startup; ``get_config()`` returns it (or
+# falls back to a default ``EngineConfig`` so library-only usage and tests
+# work without explicit wiring).
+# ────────────────────────────────────────────────────────────────────────────
+
+
+_global_config: Optional[EngineConfig] = None
+
+
+def set_config(config: EngineConfig) -> None:
+    """Wire the process-wide engine config. Call once at application startup."""
+    global _global_config
+    _global_config = config
+
+
+def get_config() -> EngineConfig:
+    """Return the wired engine config, defaulting to env-var-driven values."""
+    global _global_config
+    if _global_config is None:
+        _global_config = EngineConfig(
+            region=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"),
+            role_arn=os.getenv("AWS_ROLE_ARN"),
+            dynamodb_transformation_table=os.getenv("DYNAMODB_TRANSFORMATION_TABLE")
+            or os.getenv("DYNAMODB_TABLE"),
+            dynamodb_prompts_table=os.getenv("DYNAMODB_PROMPTS_TABLE"),
+            s3_journey_logs_bucket=os.getenv("S3_JOURNEY_LOGS_BUCKET"),
+            s3_journey_reports_bucket=os.getenv("S3_JOURNEY_REPORTS_BUCKET"),
+            max_concurrent_jobs=int(os.getenv("MAX_CONCURRENT_JOBS", "10")),
+            capability_name=os.getenv("CAPABILITY_NAME", "call-processing"),
+            environment=os.getenv("ENVIRONMENT", "dev"),
+        )
+    return _global_config
+
+
+def reset_config() -> None:
+    """Clear the wired config (mainly for tests)."""
+    global _global_config
+    _global_config = None

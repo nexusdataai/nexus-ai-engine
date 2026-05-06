@@ -9,19 +9,16 @@ from ..execution import InMemoryEngine
 
 
 def make_test_engine(*, seed_demo: bool = True, **overrides: Any) -> InMemoryEngine:
-    """Build an engine suitable for tests. Wraps :func:`build_engine`."""
+    """Build an in-memory engine suitable for tests.
+
+    Tests always get the in-memory engine — the harness predates the
+    DynamoDB-backed services and exercises the canonical service contract
+    in isolation. Pass ``in_memory=True`` to :func:`build_engine` directly
+    if you want explicit control.
+    """
     from ..factory import build_engine
 
-    _ = EngineConfig(
-        region="us-east-1",
-        dynamodb_transformation_table="test-transformation",
-        dynamodb_prompts_table="test-prompts",
-        s3_journey_logs_bucket="test-logs",
-        s3_journey_reports_bucket="test-reports",
-        max_concurrent_jobs=overrides.pop("max_concurrent_jobs", 4),
-        extras=overrides,
-    )
-    return build_engine(_, seed_demo=seed_demo)
+    return build_engine(in_memory=True, seed_demo=seed_demo)
 
 
 def make_test_app(engine: Optional[Any] = None, *, seed_demo: bool = True):

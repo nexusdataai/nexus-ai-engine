@@ -338,6 +338,48 @@ async def tool_cpu_spin(
 # ── Registration helper ──────────────────────────────────────────────────
 
 
+async def tool_emit_lots(
+    engine: InMemoryEngine,
+    job: Job,
+    step: StepResult,
+    step_def: Step,
+    ctx: dict[str, Any],
+) -> None:
+    """Emit a richer mix of log levels for the v2 UI visual sandbox.
+
+    Like ``count_to``, but interleaves INFO/WARN/ERROR levels and emits
+    paced ``task_progress`` updates. Used by the v2 view sandbox loop and
+    by tests that assert per-level grouping in `StepConsoleV2`.
+
+    Inputs:
+        n              total log lines to emit (default 30)
+        delay_seconds  pause between lines (default 0.05)
+        warn_every     emit WARN every Nth line (default 7)
+        error_every    emit ERROR every Nth line (default 13; 0 to disable)
+    """
+    spec = step_def.input or {}
+    n = int(spec.get("n", 30))
+    delay = float(spec.get("delay_seconds", 0.05))
+    warn_every = int(spec.get("warn_every", 7))
+    error_every = int(spec.get("error_every", 13))
+    for i in range(1, n + 1):
+        if engine.is_cancelled(job.id):
+            return
+        if error_every and i % error_every == 0:
+            level = "ERROR"
+            msg = f"emit_lots: simulated error at line {i}/{n}"
+        elif warn_every and i % warn_every == 0:
+            level = "WARN"
+            msg = f"emit_lots: warning at line {i}/{n}"
+        else:
+            level = "INFO"
+            msg = f"emit_lots: processed item {i}/{n}"
+        _log(engine, job, step, msg, level=level)
+        await _progress(engine, job, step, int(i / n * 100), msg)
+        if delay:
+            await asyncio.sleep(delay)
+
+
 ALL_TOOLS: dict[str, StepTool] = {
     "noop": tool_noop,
     "sleep": tool_sleep,
@@ -349,6 +391,7 @@ ALL_TOOLS: dict[str, StepTool] = {
     "cancel_checkpoint": tool_cancel_checkpoint,
     "emit_report": tool_emit_report,
     "cpu_spin": tool_cpu_spin,
+    "emit_lots": tool_emit_lots,
 }
 
 

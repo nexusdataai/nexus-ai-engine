@@ -294,12 +294,15 @@ fi
 #      generators at tests/report_generators/ (same layout + drilldown as
 #      nexus-backend).
 #   2. Upload each enhanced HTML to
-#      s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/<tier>/$TIMESTAMP/report.html
-#   3. Build a consolidated dashboard index.html (2x2 grid of tier cards,
-#      matching nexus-backend's landing page) and upload to
-#      s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/index.html
+#      s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/$COMPONENT/<tier>/$TIMESTAMP/report.html
+#   3. Build a per-component dashboard index.html (2x2 grid of tier cards)
+#      and upload to
+#      s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/$COMPONENT/index.html
 #   4. Create a CloudFront invalidation for "/*" and wait for it to finish
 #      so the next page-load shows the fresh reports.
+# The shared tabbed portal at s3://.../$S3_REPORTS_PREFIX/index.html is
+# managed separately by deploy/portal/publish-portal.sh — component test
+# runs do NOT touch it.
 # Nothing happens when UPLOAD_TO_S3 is unset/false (preserves existing flow).
 if [ "${UPLOAD_TO_S3:-false}" = "true" ] && [ "$DRY_RUN" != "true" ] && [ "$TIERS" != "none" ]; then
     echo "📤 Publishing reports to S3 + invalidating CloudFront"
@@ -310,6 +313,7 @@ if [ "${UPLOAD_TO_S3:-false}" = "true" ] && [ "$DRY_RUN" != "true" ] && [ "$TIER
     [ -z "${S3_BUCKET_NAME:-}" ]           && missing="$missing S3_BUCKET_NAME"
     [ -z "${CLOUDFRONT_DISTRIBUTION_ID:-}" ] && missing="$missing CLOUDFRONT_DISTRIBUTION_ID"
     [ -z "${CLOUDFRONT_DOMAIN:-}" ]        && missing="$missing CLOUDFRONT_DOMAIN"
+    [ -z "${COMPONENT:-}" ]                && missing="$missing COMPONENT"
     if [ -n "$missing" ]; then
         echo "❌ UPLOAD_TO_S3=true but these variables are not set:$missing"
         echo "   Populate them in $SCRIPT_DIR/.env.local and retry."
@@ -327,8 +331,9 @@ if [ "${UPLOAD_TO_S3:-false}" = "true" ] && [ "$DRY_RUN" != "true" ] && [ "$TIER
     fi
     GENERATORS_DIR="$REPO_ROOT/tests/report_generators"
 
-    echo "   Bucket:          s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/"
+    echo "   Bucket:          s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/$COMPONENT/"
     echo "   Region:          $S3_REPORTS_REGION"
+    echo "   Component:       $COMPONENT"
     echo "   CloudFront dist: $CLOUDFRONT_DISTRIBUTION_ID"
     echo "   CloudFront host: $CLOUDFRONT_DOMAIN"
     echo "   Timestamp:       $TIMESTAMP"
@@ -401,13 +406,13 @@ if [ "${UPLOAD_TO_S3:-false}" = "true" ] && [ "$DRY_RUN" != "true" ] && [ "$TIER
     # Upload each rendered HTML to a timestamped key under the prefix.
     for TIER in "${!ENHANCED_HTML[@]}"; do
         local_html="${ENHANCED_HTML[$TIER]}"
-        s3_key="$S3_REPORTS_PREFIX/$TIER/$TIMESTAMP/report.html"
+        s3_key="$S3_REPORTS_PREFIX/$COMPONENT/$TIER/$TIMESTAMP/report.html"
         echo "   📤 $TIER -> s3://$S3_BUCKET_NAME/$s3_key"
         aws s3 cp "$local_html" "s3://$S3_BUCKET_NAME/$s3_key" \
             --content-type "text/html; charset=utf-8" \
             --region "$S3_REPORTS_REGION" \
             >/dev/null
-        REMOTE_URL[$TIER]="https://$CLOUDFRONT_DOMAIN/$TIER/$TIMESTAMP/report.html"
+        REMOTE_URL[$TIER]="https://$CLOUDFRONT_DOMAIN/$COMPONENT/$TIER/$TIMESTAMP/report.html"
     done
     echo ""
 
@@ -630,8 +635,20 @@ INDEX_TEMPLATE = """<!DOCTYPE html>
         .pass-rate-text.high { color: #059669; }
         .pass-rate-text.medium { color: #d97706; }
         .pass-rate-text.low { color: #dc2626; }
-        .view-btn { font-size: 12px; color: #667eea; font-weight: 600; display: flex; align-items: center; gap: 4px; }
+        .view-btn {
+            font-size: 13px; color: white; font-weight: 700;
+            display: inline-flex; align-items: center; gap: 6px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 9px 18px; border-radius: 8px;
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.35);
+            transition: all 0.25s ease;
+            text-transform: uppercase; letter-spacing: 0.6px;
+        }
         .view-btn::after { content: '\\2192'; transition: transform 0.2s; }
+        .category-card:hover .view-btn {
+            box-shadow: 0 5px 16px rgba(102, 126, 234, 0.5);
+            transform: translateY(-1px);
+        }
         .category-card:hover .view-btn::after { transform: translateX(4px); }
         .timestamp { text-align: center; padding: 16px; color: #9ca3af; font-size: 13px; }
         @media (max-width: 768px) {
@@ -670,9 +687,9 @@ out_path.write_text(final_html, encoding="utf-8")
 print(f"index.html written to {out_path}")
 PYINDEX
 
-    echo "   📤 index.html -> s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/index.html"
+    echo "   📤 index.html -> s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/$COMPONENT/index.html"
     aws s3 cp "$INDEX_HTML" \
-        "s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/index.html" \
+        "s3://$S3_BUCKET_NAME/$S3_REPORTS_PREFIX/$COMPONENT/index.html" \
         --content-type "text/html; charset=utf-8" \
         --region "$S3_REPORTS_REGION" \
         >/dev/null
@@ -709,7 +726,8 @@ PYINDEX
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "🌐 View the latest reports:"
-    echo "   https://$CLOUDFRONT_DOMAIN/index.html"
+    echo "   Portal:    https://$CLOUDFRONT_DOMAIN/index.html"
+    echo "   Component: https://$CLOUDFRONT_DOMAIN/$COMPONENT/index.html"
     for TIER in "${!REMOTE_URL[@]}"; do
         echo "     • $TIER: ${REMOTE_URL[$TIER]}"
     done

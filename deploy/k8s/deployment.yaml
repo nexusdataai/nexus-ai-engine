@@ -44,6 +44,24 @@ spec:
           # in-pod test runs use ${ECR_REGISTRY}/nexus-ai-engine:<tag>-test.
           image: REPLACE_WITH_ECR_REGISTRY/nexus-ai-engine:latest
           imagePullPolicy: IfNotPresent
+          # Override the image's default CMD so the server bootstraps its
+          # EngineConfig from SSM Parameter Store. $(SSM_PARAMETER_PREFIX)
+          # is K8s-native env-var expansion that resolves against the
+          # ConfigMap-injected env vars (see configmap.yaml). When the
+          # parameter is absent or empty, the CLI falls back to env vars
+          # only — operators can disable SSM by clearing SSM_PARAMETER_PREFIX
+          # in the ConfigMap.
+          command: ["nexus-ai-engine"]
+          args:
+            - "--log-level"
+            - "INFO"
+            - "serve"
+            - "--host"
+            - "0.0.0.0"
+            - "--port"
+            - "8000"
+            - "--ssm-prefix"
+            - "$(SSM_PARAMETER_PREFIX)"
           ports:
             - name: http
               containerPort: 8000

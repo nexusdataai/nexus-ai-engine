@@ -628,7 +628,7 @@ h3 {
         tabs_html = ''
         for idx, (tab_id, tab_label) in enumerate(tabs):
             active_class = 'active' if idx == 0 else ''
-            tabs_html += f'<a href="#{tab_id}" class="nav-link {active_class}" onclick="showTab(\'{tab_id}\')">{tab_label}</a>\n'
+            tabs_html += f'<a href="#{tab_id}" class="nav-link {active_class}" onclick="event.preventDefault(); showTab(\'{tab_id}\'); return false;">{tab_label}</a>\n'
         
         return f'''
 <div class="report-header">
@@ -644,8 +644,7 @@ h3 {
         return '''
 <footer class="report-footer">
     <div class="container">
-        <p>AI Job Engine - Test Report</p>
-        <p>© 2025 TMF ODA Transformer Project</p>
+        <p>NexusAI Test Reports</p>
     </div>
 </footer>'''
     

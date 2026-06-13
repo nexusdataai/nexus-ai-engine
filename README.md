@@ -631,19 +631,48 @@ Security note on option C: the UI + API have no auth. Only use `--address
 0.0.0.0` on a host whose security group / firewall limits inbound on
 port 8000 to trusted source IPs.
 
-You land on the **Journeys** page showing 5 seeded journeys:
+You land on the **Journeys** page. Two cases depending on which engine
+the pod booted with:
 
-| Journey                       | Capability              |
-|-------------------------------|-------------------------|
-| Order-to-Cash Monitor         | `order-to-cash`         |
-| Call Processing Pipeline      | `call-processing`       |
-| Demand Forecasting Engine     | `demand-forecasting`    |
-| Inventory Optimization        | `inventory-optimization`|
-| Supply Chain Risk             | `supply-chain-risk`     |
+- **InMemoryEngine** (no `DYNAMODB_TRANSFORMATION_TABLE` set / no SSM
+  prefix configured) — 5 demo journeys are pre-seeded into in-process
+  state and visible immediately. They run via the random-tick simulator.
+- **Production Engine** (DynamoDB-backed, the standard EKS deploy) —
+  the table starts **empty**. The pod registers the bundled demo stages
+  at startup (default ON via `REGISTER_DEMO_STAGES=true` in the
+  ConfigMap), but you need to seed matching journey definitions:
+
+  ```bash
+  POD=$(kubectl -n ai-engine get pod -l app.kubernetes.io/name=nexus-ai-engine \
+        -o jsonpath='{.items[0].metadata.name}')
+  kubectl -n ai-engine cp scripts/seed-sample-journeys.sh "$POD":/tmp/seed.sh
+  kubectl -n ai-engine exec "$POD" -- bash /tmp/seed.sh
+  ```
+
+  Five journeys appear after re-loading the UI:
+
+  | Journey                       | ODA component type      | Stages |
+  |-------------------------------|-------------------------|--------|
+  | Order-to-Cash Monitor         | `order-management`      | 1      |
+  | Call Processing Pipeline      | `service-management`    | 3      |
+  | Demand Forecasting Engine     | `inventory-management`  | 1      |
+  | Inventory Optimization        | `inventory-management`  | 1      |
+  | Supply Chain Risk             | `resource-management`   | 1      |
 
 Click a card to open the **Journey Studio**, click **Start Processing**
-on any stage, and watch the live SSE log stream tick through the
-simulated steps. See [docs/UI.md](docs/UI.md) for the full feature list.
+on any stage, and watch the live SSE log stream tick through synthetic
+steps. Each step does a bounded random sleep + emits a realistic-looking
+log line per tick — same `BaseStage` → DynamoDB-LIVELOG → S3 → SSE path
+real production stages use, so this is a faithful framework
+performance / smoke test. See [docs/UI.md](docs/UI.md) for the full
+feature list.
+
+The bundled demo stages are opt-in via `--register-demo-stages` /
+`REGISTER_DEMO_STAGES`. Disable them once a host application registers
+real domain stages so the synthetic ones don't shadow real `order_to_cash`
+implementations. See
+[`deploy/k8s/README.md`](deploy/k8s/README.md#bundled-demo-stages-default-on)
+for the toggles.
 
 ### Step 5 — Smoke-test the running pod
 

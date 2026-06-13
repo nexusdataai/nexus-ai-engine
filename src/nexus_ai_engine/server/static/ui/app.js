@@ -22,22 +22,36 @@ const api = {
     if (params.capability) qs.set('capability', params.capability);
     if (params.limit) qs.set('limit', params.limit);
     const s = qs.toString();
-    return fetch('/api/v1/journeys/' + (s ? '?' + s : '')).then(requireOk);
+    return fetch('/api/v1/journeys/' + (s ? '?' + s : '')).then(requireOk).then(normalizeJourneyList);
   },
-  getJourney(id)          { return fetch(`/api/v1/journeys/${id}`).then(requireOk); },
-  createJourney(body)     { return postJson('/api/v1/journeys/', body); },
+  // `idHint` is forwarded into normalizeJourney so the legacy GET (which
+  // returns no id field anywhere in the body) still produces a journey
+  // object with `id` populated. Default to the URL path's id.
+  getJourney(id)          { return fetch(`/api/v1/journeys/${id}`).then(requireOk).then(j => normalizeJourney(j, id)); },
+  createJourney(body)     { return postJson('/api/v1/journeys/', body).then(j => normalizeJourney(j)); },
   deleteJourney(id)       { return fetch(`/api/v1/journeys/${id}`, { method: 'DELETE' }).then(requireOk); },
-  cloneJourney(id, name)  { return postJson(`/api/v1/journeys/${id}/clone`, name ? { name } : {}); },
+  cloneJourney(id, name)  { return postJson(`/api/v1/journeys/${id}/clone`, name ? { name } : {}).then(j => normalizeJourney(j)); },
 
-  listJobs(jid)           { return fetch(`/api/v1/journeys/${jid}/jobs`).then(requireOk); },
-  getJob(jid, id)         { return fetch(`/api/v1/journeys/${jid}/jobs/${id}`).then(requireOk); },
+  listJobs(jid)           { return fetch(`/api/v1/journeys/${jid}/jobs`).then(requireOk).then(normalizeJobList); },
+  getJob(jid, id)         { return fetch(`/api/v1/journeys/${jid}/jobs/${id}`).then(requireOk).then(j => normalizeJob(j, id)); },
   jobStatus(jid, id)      { return fetch(`/api/v1/journeys/${jid}/jobs/${id}/status`).then(requireOk); },
+  // The legacy router takes stage_id / triggered_by / reason as query
+  // params (`POST /{jid}/jobs?stage_id=...`). The slim router takes them
+  // as a JSON body (`JobRunRequest`). Sending BOTH satisfies both —
+  // FastAPI's query-param parser ignores the body, and Pydantic's body
+  // parser ignores the query string. The legacy router's response uses
+  // `job_id` rather than `id`, so we run it through normalizeJob.
   runJob(jid, stageId, reason) {
-    return postJson(`/api/v1/journeys/${jid}/jobs`, { stage_id: stageId, triggered_by: 'ui', reason });
+    const qs = new URLSearchParams({ stage_id: stageId, triggered_by: 'ui' });
+    if (reason) qs.set('reason', reason);
+    return postJson(
+      `/api/v1/journeys/${jid}/jobs?${qs.toString()}`,
+      { stage_id: stageId, triggered_by: 'ui', reason },
+    ).then(j => normalizeJob(j));
   },
-  cancelJob(jid, id)      { return postJson(`/api/v1/journeys/${jid}/jobs/${id}/cancel`, {}); },
-  retryJob(jid, id)       { return postJson(`/api/v1/journeys/${jid}/jobs/${id}/retry`, {}); },
-  jobLogs(jid, id)        { return fetch(`/api/v1/journeys/${jid}/jobs/${id}/logs`).then(requireOk); },
+  cancelJob(jid, id)      { return postJson(`/api/v1/journeys/${jid}/jobs/${id}/cancel`, {}).then(j => normalizeJob(j, id)); },
+  retryJob(jid, id)       { return postJson(`/api/v1/journeys/${jid}/jobs/${id}/retry`, {}).then(j => normalizeJob(j, id)); },
+  jobLogs(jid, id)        { return fetch(`/api/v1/journeys/${jid}/jobs/${id}/logs`).then(requireOk).then(normalizeLogs); },
 
   aggregateReport(jid)    { return fetch(`/api/v1/journeys/${jid}/aggregate-report`).then(requireOk); },
   listJobReports(jid, id) { return fetch(`/api/v1/journeys/${jid}/jobs/${id}/reports`).then(requireOk); },
@@ -55,6 +69,13 @@ const api = {
   updatePrompt(id, body)  { return putJson(`/api/v1/prompts/${id}`, body); },
   resetPrompts()          { return postJson('/api/v1/prompts/reset', {}); },
   promptAudit(limit = 50) { return fetch(`/api/v1/prompts/audit/log?limit=${limit}`).then(requireOk); },
+
+  // Lightweight read of every registered stage's metadata + step list.
+  // Used by the v2 UI to enrich `journey.stages[].steps` because the
+  // legacy DynamoDB router persists stage records without their steps
+  // (steps are an inherent property of the registered stage class).
+  // Returns: { count, stages: [{stage_id, name, description, steps:[...]}, ...] }
+  listRegisteredStages()  { return fetch('/api/v1/stages/registered').then(requireOk); },
 };
 
 function postJson(url, body) {
@@ -72,7 +93,234 @@ async function requireOk(res) {
     throw new Error(`${res.status} ${res.statusText}: ${text}`);
   }
   if (res.status === 204) return null;
-  return res.json();
+  const body = await res.json();
+  return unwrapEnvelope(body);
+}
+
+// The slim routers (in-memory engine path) return raw Pydantic models
+// (e.g. `Journey`, `Job`, `LogEntry[]`). The legacy routers (production
+// DynamoDB-backed Engine) wrap every response in an envelope:
+//   - List:   `{success, total, limit, offset, data: [...]}`
+//   - Single: `{success, message, data: {...}}`
+//   - Error:  `{success: false, message: "..."}`  (HTTP 200 with error inside)
+// The same UI talks to both, so we strip the envelope here. When the body
+// is already a raw model we pass it through untouched.
+function unwrapEnvelope(body) {
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) return body;
+  // Envelope shape detection: `success` is the unique marker.
+  if (!('success' in body)) return body;
+  if (body.success === false) {
+    throw new Error(body.message || body.error || 'request failed');
+  }
+  // `data` may be missing for confirmation-only responses (e.g. delete);
+  // fall back to the envelope itself so callers that only need the
+  // success flag still get something useful.
+  return 'data' in body ? body.data : body;
+}
+
+// Map a Journey object from either backend shape to the canonical slim
+// shape the UI expects. The two backends return very different bodies:
+//
+//   Slim (in-memory engine):
+//     {id, name, capability, status, created_at, updated_at, stages,
+//      jobs_total, jobs_done, success_rate, avg_duration_seconds, ...}
+//
+//   Legacy GET /api/v1/journeys/{id} (DynamoDB engine):
+//     {summary: {...}, stages: [], jobs: [], rules: [],
+//      createdAt, updatedAt,
+//      metadata: {name, status, odaComponentType, createdBy, ...}}
+//     Note: NO journeyId / id field anywhere in the body — the ID is
+//     only known from the URL path that fetched it.
+//
+//   Legacy GET /api/v1/journeys/ (list, per-row):
+//     {journeyId, name, status, odaComponentType, createdAt, updatedAt,
+//      totalJobs, completedJobs, failedJobs, overallProgress, ...}
+//
+// We harvest fields from wherever they live (top level, then nested
+// `metadata`) and fall back to a caller-supplied `idHint` (the URL
+// path's journeyId) for the missing-id case.
+function normalizeJourney(raw, idHint) {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const j = { ...raw };
+  const meta = (j.metadata && typeof j.metadata === 'object') ? j.metadata : {};
+
+  // ID — try every shape, fall back to the URL hint.
+  if (j.id == null) j.id = j.journeyId ?? meta.journeyId ?? meta.id ?? idHint ?? null;
+
+  // Display fields — legacy GET puts these in metadata.
+  if (j.name == null)        j.name        = meta.name ?? j.id ?? 'Journey';
+  if (j.description == null) j.description = meta.description ?? j.description ?? '';
+  if (j.status == null)      j.status      = meta.status ?? 'created';
+
+  // Capability ← odaComponentType (top-level or nested).
+  if (j.capability == null) {
+    j.capability = j.odaComponentType ?? meta.odaComponentType ?? null;
+  }
+
+  // Timestamps.
+  if (j.created_at == null) j.created_at = j.createdAt ?? meta.createdAt ?? null;
+  if (j.updated_at == null) j.updated_at = j.updatedAt ?? meta.updatedAt ?? null;
+
+  // Aggregate counters / rates — legacy may surface them under different
+  // names (totalJobs, completedJobs, ...) on the LIST endpoint, or skip
+  // them entirely on the detail endpoint. Default everything to 0 so the
+  // cards never crash on missing fields.
+  if (typeof j.jobs_total !== 'number') {
+    j.jobs_total = j.totalJobs ?? meta.totalJobs ?? 0;
+  }
+  if (typeof j.jobs_done !== 'number') {
+    j.jobs_done = j.completedJobs ?? meta.completedJobs ?? 0;
+  }
+  if (typeof j.jobs_running !== 'number') {
+    j.jobs_running = j.runningJobs ?? meta.runningJobs ?? 0;
+  }
+  if (typeof j.jobs_failed !== 'number') {
+    j.jobs_failed = j.failedJobs ?? meta.failedJobs ?? 0;
+  }
+  if (typeof j.success_rate !== 'number')         j.success_rate = 0;
+  if (typeof j.avg_duration_seconds !== 'number') j.avg_duration_seconds = 0;
+
+  if (!Array.isArray(j.stages)) j.stages = [];
+  return j;
+}
+
+function normalizeJourneyList(raw) {
+  if (!Array.isArray(raw)) return raw;
+  return raw.map(j => normalizeJourney(j));
+}
+
+// Map a Job object from either backend shape to the canonical slim shape.
+//
+//   Slim:   {id, journey_id, stage_id, status, progress, current_step_id,
+//            step_results: [{step_id, status, progress, started_at, ended_at, ...}],
+//            metrics: {...}, started_at, ended_at, duration_seconds, ...}
+//
+//   Legacy POST /jobs response (envelope-stripped):
+//     {job_id, stage_id, triggered_by, status, status_url}
+//
+//   Legacy GET  /jobs/{id} response (envelope-stripped):
+//     {jobId, stageId, status, progress, triggeredBy, startedAt, completedAt,
+//      duration, steps: [{stepId, status, duration, ...}], metrics: {...}}
+//
+// `idHint` is the URL-path job_id used as a fallback when the body
+// doesn't include the id.
+function normalizeJob(raw, idHint) {
+  if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const j = { ...raw };
+
+  if (j.id == null) j.id = j.job_id ?? j.jobId ?? idHint ?? null;
+  if (j.journey_id == null) j.journey_id = j.journeyId ?? null;
+  if (j.stage_id == null) j.stage_id = j.stageId ?? null;
+  if (j.status == null) j.status = 'queued';
+  if (j.progress == null) j.progress = 0;
+  if (j.current_step_id == null && j.currentStepId != null) j.current_step_id = j.currentStepId;
+  if (j.started_at == null && j.startedAt != null) j.started_at = j.startedAt;
+  if (j.ended_at == null && (j.completedAt != null || j.endedAt != null)) {
+    j.ended_at = j.completedAt ?? j.endedAt;
+  }
+  if (j.duration_seconds == null && j.duration != null) {
+    j.duration_seconds = typeof j.duration === 'number' ? j.duration : null;
+  }
+  if (!Array.isArray(j.step_results)) {
+    // Legacy uses `steps`; map to slim's `step_results` shape.
+    j.step_results = Array.isArray(j.steps)
+      ? j.steps.map(s => ({
+          step_id:  s.step_id ?? s.stepId ?? null,
+          status:   s.status ?? 'queued',
+          progress: s.progress ?? (s.status === 'completed' ? 100 : 0),
+          started_at: s.started_at ?? s.startedAt ?? null,
+          ended_at:   s.ended_at   ?? s.endedAt   ?? s.completedAt ?? null,
+          error:      s.error      ?? null,
+          log_count:  s.log_count  ?? s.logCount  ?? 0,
+        }))
+      : [];
+  }
+  if (j.metrics == null || typeof j.metrics !== 'object') j.metrics = {};
+  return j;
+}
+
+function normalizeJobList(raw) {
+  // Legacy `GET /jobs` lists journey rows under `data.jobs`. The envelope
+  // unwrap step exposes either an array of jobs or a wrapping dict.
+  if (raw == null) return [];
+  const jobs = Array.isArray(raw) ? raw : (Array.isArray(raw.jobs) ? raw.jobs : []);
+  return jobs.map(j => normalizeJob(j));
+}
+
+// Log entry shape:
+//   Slim:   [{timestamp, level, message, step_id}]
+//   Legacy: nested under `data.logs` or directly at the top, with field
+//           names that vary (`step_name` vs `step_id`, `log_message` vs
+//           `message`, etc.). The v2 UI streams logs via SSE in real time
+//           anyway; this REST fallback just needs to not crash.
+function normalizeLogs(raw) {
+  if (raw == null) return [];
+  let arr = raw;
+  if (!Array.isArray(arr)) {
+    if (Array.isArray(raw.logs)) arr = raw.logs;
+    else if (raw.data && Array.isArray(raw.data.logs)) arr = raw.data.logs;
+    else if (raw.data && Array.isArray(raw.data)) arr = raw.data;
+    else return [];
+  }
+  return arr.map(l => ({
+    timestamp: l.timestamp ?? l.time ?? l.created_at ?? null,
+    level:     (l.level ?? 'info').toString().toLowerCase(),
+    message:   l.message ?? l.log_message ?? l.text ?? '',
+    step_id:   l.step_id ?? l.stepId ?? l.step_name ?? null,
+  }));
+}
+
+// Normalise a single stage record from either backend shape into the
+// canonical UI-facing shape `{id, name, description, status, steps}`.
+function normalizeStage(raw) {
+  if (raw == null || typeof raw !== 'object') return raw;
+  const s = { ...raw };
+  if (s.id == null && s.stage_id != null)  s.id = s.stage_id;
+  if (s.id == null && s.stageId != null)   s.id = s.stageId;
+  if (s.name == null && s.id != null)      s.name = s.id;
+  if (!Array.isArray(s.steps))             s.steps = [];
+  // Per-step normalisation — legacy stage records may store steps under
+  // `stepId` or omit fields entirely. The v2 UI reads `step.id` / `step.name`.
+  s.steps = s.steps.map(st => {
+    if (st == null || typeof st !== 'object') return st;
+    const out = { ...st };
+    if (out.id == null && out.stepId != null) out.id = out.stepId;
+    if (out.id == null && out.step_id != null) out.id = out.step_id;
+    if (out.name == null && out.id != null) out.name = out.id;
+    return out;
+  });
+  return s;
+}
+
+// Merge step lists from the registered-stage map into a journey's
+// stages: when a journey's stage has an empty `steps` array but its
+// stage_id is in the registry, copy the registered steps over. Mutates
+// nothing — returns a new journey object with new stages.
+function enrichJourneyStagesFromRegistry(journey, registeredStages) {
+  if (!journey || !Array.isArray(journey.stages)) return journey;
+  if (!Array.isArray(registeredStages) || !registeredStages.length) {
+    return { ...journey, stages: journey.stages.map(normalizeStage) };
+  }
+  const byId = new Map(registeredStages.map(r => [r.stage_id, r]));
+  const enriched = journey.stages.map(rawStage => {
+    const s = normalizeStage(rawStage);
+    if (s.steps.length) return s; // journey already supplied steps
+    const reg = byId.get(s.id);
+    if (!reg) return s;            // unregistered stage; nothing to copy
+    return {
+      ...s,
+      // Backfill name / description from the registered class metadata
+      // when the persisted stage record left them blank.
+      name:        s.name || reg.name,
+      description: s.description || reg.description,
+      steps:       (reg.steps || []).map(st => ({
+        id:          st.id,
+        name:        st.name,
+        description: st.description || '',
+      })),
+    };
+  });
+  return { ...journey, stages: enriched };
 }
 
 /* ─────────────────────── Utilities ─────────────────────── */
@@ -140,6 +388,9 @@ function parseRoute(hash) {
   if (parts.length === 0) return { name: 'journeys' };
   if (parts[0] === 'journey' && parts[1] && parts[2] === 'jobs') {
     return { name: 'jobs', journeyId: parts[1] };
+  }
+  if (parts[0] === 'journey' && parts[1] && parts[2] === 'v2') {
+    return { name: 'studio_v2', journeyId: parts[1] };
   }
   if (parts[0] === 'journey' && parts[1]) {
     return { name: 'studio', journeyId: parts[1] };
@@ -294,7 +545,7 @@ function JourneyCard({ journey, onOpen, onDelete, onClone }) {
         <div><div className="metric__value metric__value--failed">{journey.jobs_failed}</div><div className="metric__label">Failed</div></div>
       </div>
       <div className="card__kpis">
-        <div><span className="card__kpi--value">{journey.success_rate.toFixed(0)}%</span> <span className="muted">Success</span></div>
+        <div><span className="card__kpi--value">{(journey.success_rate ?? 0).toFixed(0)}%</span> <span className="muted">Success</span></div>
         <div><span className="card__kpi--value">{fmtDuration(journey.avg_duration_seconds)}</span> <span className="muted">Avg dur</span></div>
       </div>
       <div className="card__footer">
@@ -324,15 +575,17 @@ function JourneyStudioPage({ journeyId }) {
 
   const load = useCallback(async () => {
     try {
-      const [j, agg, sch] = await Promise.all([
+      const [j, agg, sch, registry] = await Promise.all([
         api.getJourney(journeyId),
         api.aggregateReport(journeyId).catch(() => null),
         api.listSchedules(journeyId).catch(() => []),
+        api.listRegisteredStages().catch(() => ({ stages: [] })),
       ]);
-      setJourney(j);
+      const enriched = enrichJourneyStagesFromRegistry(j, registry?.stages || []);
+      setJourney(enriched);
       setAggregate(agg);
       setSchedules(sch);
-      if (j.stages.length && !activeStageId) setActiveStageId(j.stages[0].id);
+      if (enriched.stages.length && !activeStageId) setActiveStageId(enriched.stages[0].id);
     } catch (e) {
       setError(e.message);
     }
@@ -375,14 +628,15 @@ function JourneyStudioPage({ journeyId }) {
           </span>
         </div>
         <div className="row">
+          <button className="btn btn--primary" onClick={() => navigate(`#/journey/${journey.id}/v2`)} title="GitHub-Actions-style live view (preview)">↗ Open v2 view</button>
           <button className="btn" onClick={() => navigate(`#/journey/${journey.id}/jobs`)}>View All Jobs</button>
           <button className="btn btn--ghost" onClick={load}>↻ Refresh</button>
         </div>
       </div>
 
       <div className="stats-row mt-20">
-        <StatCard label="Total Jobs" value={journey.jobs_total} />
-        <StatCard label="Success Rate" value={`${journey.success_rate.toFixed(0)}%`} />
+        <StatCard label="Total Jobs" value={journey.jobs_total ?? 0} />
+        <StatCard label="Success Rate" value={`${(journey.success_rate ?? 0).toFixed(0)}%`} />
         <StatCard label="Avg Duration" value={fmtDuration(journey.avg_duration_seconds)} />
         <StatCard label="Calls Processed" value={aggregate ? aggregate.total_calls_processed : '—'} />
       </div>
@@ -477,15 +731,17 @@ function JobHistoryPage({ journeyId }) {
 
   const load = useCallback(async () => {
     try {
-      const [j, js, ss] = await Promise.all([
+      const [j, js, ss, registry] = await Promise.all([
         api.getJourney(journeyId),
         api.listJobs(journeyId),
         api.listSchedules(journeyId).catch(() => []),
+        api.listRegisteredStages().catch(() => ({ stages: [] })),
       ]);
-      setJourney(j);
+      const enriched = enrichJourneyStagesFromRegistry(j, registry?.stages || []);
+      setJourney(enriched);
       setJobs(js);
       setSchedules(ss);
-      if (j.stages.length && !activeStageId) setActiveStageId(j.stages[0].id);
+      if (enriched.stages.length && !activeStageId) setActiveStageId(enriched.stages[0].id);
     } catch (e) {
       setError(e.message);
     }
@@ -929,6 +1185,686 @@ function LogsDrawer({ journeyId, jobId, onClose }) {
   );
 }
 
+/* ─────────────────────── Journey studio V2 (GitHub-Actions style) ─────────────────────── */
+
+const STEP_STATUS_PENDING   = 'pending';
+const STEP_STATUS_RUNNING   = 'running';
+const STEP_STATUS_COMPLETED = 'completed';
+const STEP_STATUS_FAILED    = 'failed';
+
+const LEVEL_ORDER = ['debug', 'info', 'warn', 'warning', 'error'];
+
+function fmtTimeMs(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+function normalizeLevel(level) {
+  const l = (level || 'info').toLowerCase();
+  if (l === 'warning') return 'warn';
+  return l;
+}
+
+/* StepConsoleV2 — GitHub-Actions-style inline terminal for one step's logs.
+ * Pure presentational; parent owns log state and passes it in. */
+function StepConsoleV2({ stepId, stepName, status, logs, levelFilter, onLevelFilterChange }) {
+  const scrollRef = useRef(null);
+  const [followTail, setFollowTail] = useState(true);
+  const [copyState, setCopyState] = useState('idle');
+
+  const filtered = useMemo(() => {
+    if (!levelFilter || levelFilter === 'all') return logs;
+    return logs.filter(l => {
+      const lv = normalizeLevel(l.level);
+      if (levelFilter === 'warn')  return lv === 'warn';
+      if (levelFilter === 'error') return lv === 'error';
+      if (levelFilter === 'info')  return lv === 'info' || lv === 'debug';
+      return true;
+    });
+  }, [logs, levelFilter]);
+
+  useEffect(() => {
+    if (!followTail) return;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [filtered.length, followTail]);
+
+  const onScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 12;
+    setFollowTail(atBottom);
+  }, []);
+
+  const onCopy = useCallback(() => {
+    const text = filtered.map(l => `${fmtTimeMs(l.timestamp)} [${(l.level||'INFO').toUpperCase()}] ${l.message}`).join('\n');
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(
+        () => { setCopyState('copied'); setTimeout(() => setCopyState('idle'), 1200); },
+        () => setCopyState('idle'),
+      );
+    }
+  }, [filtered]);
+
+  const onDownload = useCallback(() => {
+    const text = filtered.map(l => `${fmtTimeMs(l.timestamp)} [${(l.level||'INFO').toUpperCase()}] ${l.message}`).join('\n');
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(stepName || stepId || 'step').toLowerCase().replace(/[^a-z0-9-_]+/g, '-')}.log`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [filtered, stepId, stepName]);
+
+  const jumpToLatest = useCallback(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    setFollowTail(true);
+  }, []);
+
+  return (
+    <div className="console-v2">
+      <div className="console-v2__head">
+        <div className="console-v2__title">
+          <span className="console-v2__dot" data-status={status} />
+          <span className="console-v2__name">{stepName || stepId}</span>
+          <span className="console-v2__count">{logs.length} line{logs.length === 1 ? '' : 's'}</span>
+        </div>
+        <div className="console-v2__filters">
+          {['all', 'info', 'warn', 'error'].map(lv => (
+            <button
+              key={lv}
+              className={cx('chip', levelFilter === lv && 'chip--active', `chip--${lv}`)}
+              onClick={() => onLevelFilterChange(lv)}
+              title={`Show ${lv}`}
+            >{lv}</button>
+          ))}
+          <button className="chip chip--ghost" onClick={onCopy} title="Copy all log lines">
+            {copyState === 'copied' ? 'copied' : 'copy'}
+          </button>
+          <button className="chip chip--ghost" onClick={onDownload} title="Download .log">download</button>
+        </div>
+      </div>
+      <div className="console-v2__body" ref={scrollRef} onScroll={onScroll}>
+        {filtered.length === 0 ? (
+          <div className="console-v2__empty">
+            {status === STEP_STATUS_RUNNING
+              ? 'Waiting for output…'
+              : status === STEP_STATUS_PENDING
+                ? 'Step has not started yet.'
+                : 'No logs.'}
+          </div>
+        ) : filtered.map((l, i) => {
+          const lv = normalizeLevel(l.level);
+          return (
+            <div key={i} className={cx('console-v2__line', `console-v2__line--${lv}`)}>
+              <span className="console-v2__time">{fmtTimeMs(l.timestamp)}</span>
+              <span className={cx('console-v2__lvl', `console-v2__lvl--${lv}`)}>{(l.level || 'INFO').toUpperCase()}</span>
+              <span className="console-v2__msg">{l.message}</span>
+            </div>
+          );
+        })}
+      </div>
+      {!followTail && filtered.length > 0 && (
+        <button className="console-v2__jump" onClick={jumpToLatest}>↓ Jump to latest</button>
+      )}
+    </div>
+  );
+}
+
+function JourneyStudioV2Page({ journeyId }) {
+  const [journey, setJourney]               = useState(null);
+  const [activeStageId, setActiveStageId]   = useState(null);
+  const [error, setError]                   = useState(null);
+
+  // Live job state (one job at a time on this page)
+  const [jobId, setJobId]                   = useState(null);
+  const [job, setJob]                       = useState(null);
+  const [jobStatus, setJobStatus]           = useState(null);     // 'running' | 'completed' | ...
+  const [currentStepId, setCurrentStepId]   = useState(null);
+  const [stepStates, setStepStates]         = useState({});       // {stepId: {status, progress, current, total}}
+  const [stepLogs, setStepLogs]             = useState({});       // {stepId: LogEntry[]}
+  const [expanded, setExpanded]             = useState({});       // {stepId: bool}
+  const [levelFilter, setLevelFilter]       = useState({});       // {stepId: 'all'|'info'|'warn'|'error'}
+  const [sseStatus, setSseStatus]           = useState('idle');   // 'idle'|'connecting'|'connected'|'disconnected'
+
+  const stepRefs                            = useRef({});
+  const esRef                               = useRef(null);
+  const reconnectAttemptsRef                = useRef(0);
+  const restPollersRef                      = useRef({ status: null, logs: null });
+  const lastFocusedStepRef                  = useRef(null);
+  // GitHub-Actions UX: only one step's console is open at a time by default.
+  // When the SSE stream advances to a new running step we collapse the
+  // previous one. The user clicking "Expand all" pins this off so manual
+  // expansion sticks; "Collapse all" or starting a new job resets to true.
+  const autoCollapseRef                     = useRef(true);
+
+  const toast = useToast();
+
+  // ── Load journey + restore the most recent job on mount ──────────
+  const loadJourney = useCallback(async () => {
+    try {
+      // Fetch journey + registered-stages map in parallel; the legacy
+      // DynamoDB router persists stages without their step list, so we
+      // backfill steps from the registered stage class metadata here.
+      // listRegisteredStages() failures are non-fatal — the journey
+      // still renders, just without enriched steps.
+      const [j, registry] = await Promise.all([
+        api.getJourney(journeyId),
+        api.listRegisteredStages().catch(() => ({ stages: [] })),
+      ]);
+      const enriched = enrichJourneyStagesFromRegistry(j, registry?.stages || []);
+      setJourney(enriched);
+      setActiveStageId(prev => prev || (enriched.stages[0]?.id ?? null));
+    } catch (e) { setError(e.message); }
+  }, [journeyId]);
+
+  useEffect(() => { loadJourney(); }, [loadJourney]);
+
+  const activeStage = useMemo(
+    () => (journey?.stages || []).find(s => s.id === activeStageId) || null,
+    [journey, activeStageId]
+  );
+
+  // Initialize per-step state when the active stage changes.
+  useEffect(() => {
+    if (!activeStage) return;
+    const initStates = {};
+    const initFilters = {};
+    activeStage.steps.forEach(s => {
+      initStates[s.id] = { status: STEP_STATUS_PENDING, progress: 0 };
+      initFilters[s.id] = 'all';
+    });
+    setStepStates(initStates);
+    setLevelFilter(initFilters);
+    setStepLogs({});
+    setExpanded({});
+    setCurrentStepId(null);
+    setJob(null);
+    setJobStatus(null);
+  }, [activeStage?.id]);
+
+  // ── SSE wiring (named events) ────────────────────────────────────
+  const closeStream = useCallback(() => {
+    if (esRef.current) {
+      try { esRef.current.close(); } catch (_) {}
+      esRef.current = null;
+    }
+    if (restPollersRef.current.status) clearInterval(restPollersRef.current.status);
+    if (restPollersRef.current.logs)   clearInterval(restPollersRef.current.logs);
+    restPollersRef.current = { status: null, logs: null };
+  }, []);
+
+  const refetchCanonicalLogs = useCallback(async (jid) => {
+    // Two backends, two log shapes:
+    //   - Slim:   GET /logs returns the entire flat array in one shot.
+    //   - Legacy: GET /logs is a per-(stage, step) endpoint — without
+    //             stage_name+step_name query params it returns [].
+    // The legacy backend is what the production deploy hits, so we fan
+    // out one request per step and merge with what we've already got
+    // from the SSE stream. Empty REST responses don't wipe the in-memory
+    // streamed lines.
+    if (!jid || !activeStage) return;
+    try {
+      const grouped = {};
+      await Promise.all(activeStage.steps.map(async (step) => {
+        const url = `/api/v1/journeys/${journeyId}/jobs/${jid}/logs`
+          + `?stage_name=${encodeURIComponent(activeStage.id)}`
+          + `&step_name=${encodeURIComponent(step.id)}`;
+        try {
+          const r = await fetch(url, { cache: 'no-store' });
+          if (!r.ok) return;
+          const body = await r.json().catch(() => ({}));
+          // Legacy: {data: {logs: [...]}}; slim: [...]; defensive on both.
+          const arr = Array.isArray(body) ? body
+            : (body?.data?.logs ?? body?.logs ?? []);
+          if (!Array.isArray(arr) || arr.length === 0) return;
+          grouped[step.id] = arr.map(l => ({
+            timestamp: l.timestamp ?? l.time ?? null,
+            level:     (l.level ?? 'info').toString().toLowerCase(),
+            message:   l.message ?? l.log_message ?? '',
+            step_id:   l.step_id ?? l.stepId ?? l.step_name ?? step.id,
+          }));
+        } catch (_) {}
+      }));
+      // Merge: REST wins per-step when it has data, otherwise keep the
+      // SSE-streamed lines that are already in state.
+      if (Object.keys(grouped).length > 0) {
+        setStepLogs(prev => ({ ...prev, ...grouped }));
+      }
+    } catch (_) {}
+  }, [journeyId, activeStage]);
+
+  const refetchJob = useCallback(async (jid) => {
+    if (!jid) return;
+    try {
+      const j = await api.getJob(journeyId, jid);
+      setJob(j);
+      setJobStatus(j.status);
+      setCurrentStepId(j.current_step_id || null);
+    } catch (_) {}
+  }, [journeyId]);
+
+  const startRestFallback = useCallback((jid) => {
+    if (restPollersRef.current.status || restPollersRef.current.logs) return;
+    restPollersRef.current.status = setInterval(() => refetchJob(jid),  2000);
+    restPollersRef.current.logs   = setInterval(() => refetchCanonicalLogs(jid), 3000);
+  }, [refetchJob, refetchCanonicalLogs]);
+
+  // SSE payload normalizer.
+  //
+  // Two server-side formats coexist in the wider Nexus stack:
+  //   • SimpleSSEManager (in-engine demo): JobEvent shape
+  //     `{type, job_id, step_id, data: {...kwargs}, timestamp}`
+  //   • Production SSEManager: flat shape
+  //     `{step_id, status, step_index, progress, message, timestamp}`
+  // We pick fields from `data.data` first (wrapped) then fall back to `data`
+  // so the same v2 page works against either backend.
+  const pick = (evt, key) => {
+    if (evt == null) return undefined;
+    if (evt.data && typeof evt.data === 'object' && key in evt.data) return evt.data[key];
+    return evt[key];
+  };
+
+  const onStepStatus = useCallback((evt) => {
+    const sid = evt.step_id ?? pick(evt, 'step_id');
+    if (!sid) return;
+    const rawStatus = pick(evt, 'status') ?? evt.status;
+    const status = rawStatus === 'in_progress' ? STEP_STATUS_RUNNING : rawStatus;
+    const progress = pick(evt, 'progress');
+
+    setStepStates(prev => {
+      const next = { ...prev };
+      next[sid] = {
+        ...(next[sid] || {}),
+        status,
+        progress: progress ?? next[sid]?.progress ?? 0,
+      };
+      // When this step starts, mark all prior steps in the active stage completed.
+      if (status === STEP_STATUS_RUNNING && activeStage) {
+        const idx = activeStage.steps.findIndex(s => s.id === sid);
+        activeStage.steps.forEach((s, i) => {
+          if (i < idx) {
+            const ps = next[s.id]?.status;
+            if (ps !== STEP_STATUS_FAILED && ps !== STEP_STATUS_COMPLETED) {
+              next[s.id] = { ...(next[s.id] || {}), status: STEP_STATUS_COMPLETED, progress: 100 };
+            }
+          }
+        });
+      }
+      if (status === STEP_STATUS_COMPLETED) {
+        next[sid] = { ...(next[sid] || {}), status, progress: 100 };
+      }
+      return next;
+    });
+
+    if (status === STEP_STATUS_RUNNING) {
+      setCurrentStepId(sid);
+      setExpanded(prev => (
+        autoCollapseRef.current
+          // Only one step open at a time — prior consoles auto-collapse.
+          ? { [sid]: true }
+          : { ...prev, [sid]: true }
+      ));
+    }
+    if (status === STEP_STATUS_FAILED) {
+      // Always keep the failed step's console open so the user sees the
+      // error context, regardless of auto-collapse mode.
+      setExpanded(prev => ({ ...prev, [sid]: true }));
+    }
+  }, [activeStage]);
+
+  const onLog = useCallback((evt) => {
+    const sid = evt.step_id ?? pick(evt, 'step_id') ?? '__unstepped__';
+    const entry = {
+      timestamp: evt.timestamp || pick(evt, 'timestamp') || new Date().toISOString(),
+      level:     pick(evt, 'level') ?? evt.level ?? 'info',
+      message:   pick(evt, 'message') ?? evt.message ?? '',
+      step_id:   evt.step_id ?? pick(evt, 'step_id'),
+    };
+    setStepLogs(prev => {
+      const cur = prev[sid] || [];
+      return { ...prev, [sid]: [...cur, entry] };
+    });
+  }, []);
+
+  const onTaskProgress = useCallback((evt) => {
+    const sid = evt.step_id ?? pick(evt, 'step_id');
+    if (!sid) return;
+    const progress = pick(evt, 'progress') ?? pick(evt, 'percentage');
+    const current  = pick(evt, 'current');
+    const total    = pick(evt, 'total');
+    setStepStates(prev => ({
+      ...prev,
+      [sid]: {
+        ...(prev[sid] || {}),
+        status: prev[sid]?.status === STEP_STATUS_COMPLETED ? STEP_STATUS_COMPLETED : STEP_STATUS_RUNNING,
+        progress: progress ?? prev[sid]?.progress ?? 0,
+        current:  current ?? prev[sid]?.current,
+        total:    total   ?? prev[sid]?.total,
+      },
+    }));
+  }, []);
+
+  const connectStream = useCallback((jid) => {
+    closeStream();
+    setSseStatus('connecting');
+    let es;
+    try {
+      es = new EventSource(`/api/v1/journeys/${journeyId}/jobs/${jid}/stream`);
+    } catch (e) {
+      setSseStatus('disconnected');
+      startRestFallback(jid);
+      return;
+    }
+    esRef.current = es;
+    es.onopen = () => {
+      setSseStatus('connected');
+      reconnectAttemptsRef.current = 0;
+    };
+    es.addEventListener('step_status',   (e) => { try { onStepStatus(JSON.parse(e.data)); }    catch (_) {} });
+    es.addEventListener('log',           (e) => { try { onLog(JSON.parse(e.data)); }           catch (_) {} });
+    es.addEventListener('task_progress', (e) => { try { onTaskProgress(JSON.parse(e.data)); }  catch (_) {} });
+    es.addEventListener('job_complete',  (e) => {
+      // Close over `jid` directly — `jobId` from React state may be stale
+      // when this listener fires because connectStream runs synchronously
+      // right after setJobId() but before the re-render commits.
+      try {
+        const evt = JSON.parse(e.data);
+        const status = pick(evt, 'status') ?? evt.status ?? 'completed';
+        setJobStatus(status);
+        // Production `TransformationJobExecutor` only emits
+        // `step_status:in_progress` events — never an explicit
+        // `step_status:completed` for the running step. Our normal
+        // heuristic (mark step N completed when step N+1 fires running)
+        // therefore leaves the LAST step stuck on Active/0% forever.
+        // Fix: when the job terminates successfully, sweep every step
+        // in the active stage that isn't already failed and mark it
+        // completed. Failed steps stay as-is so error context is preserved.
+        if (status === 'completed' && activeStage) {
+          setStepStates(prev => {
+            const next = { ...prev };
+            activeStage.steps.forEach(s => {
+              const cur = next[s.id]?.status;
+              if (cur !== STEP_STATUS_FAILED) {
+                next[s.id] = {
+                  ...(next[s.id] || {}),
+                  status:   STEP_STATUS_COMPLETED,
+                  progress: 100,
+                };
+              }
+            });
+            return next;
+          });
+        }
+        setCurrentStepId(null);
+        closeStream();
+        refetchCanonicalLogs(jid);
+        refetchJob(jid);
+      } catch (_) {}
+    });
+    es.onerror = () => {
+      setSseStatus('disconnected');
+      try { es.close(); } catch (_) {}
+      esRef.current = null;
+      reconnectAttemptsRef.current += 1;
+      if (reconnectAttemptsRef.current <= 5) {
+        const delay = Math.min(8000, 500 * Math.pow(2, reconnectAttemptsRef.current));
+        setTimeout(() => {
+          if (jobStatus !== 'completed' && jobStatus !== 'failed' && jobStatus !== 'cancelled') {
+            connectStream(jid);
+          }
+        }, delay);
+      } else {
+        startRestFallback(jid);
+      }
+    };
+  }, [journeyId, closeStream, onStepStatus, onLog, onTaskProgress, refetchCanonicalLogs, refetchJob, startRestFallback, jobStatus, activeStage]);
+
+  // Auto-scroll the active step into the center of the viewport.
+  useEffect(() => {
+    if (!currentStepId) return;
+    if (lastFocusedStepRef.current === currentStepId) return;
+    lastFocusedStepRef.current = currentStepId;
+    const el = stepRefs.current[currentStepId];
+    if (el && typeof el.scrollIntoView === 'function') {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+  }, [currentStepId]);
+
+  // Cleanup stream on unmount or job change.
+  useEffect(() => () => closeStream(), [closeStream]);
+
+  const onStart = useCallback(async () => {
+    if (!activeStage) return;
+    try {
+      const newJob = await api.runJob(journey.id, activeStage.id, 'manual run from v2 view');
+      lastFocusedStepRef.current = null;
+      // Reset auto-collapse mode for the new run so the open-current-only
+      // behaviour kicks in even if the user had pinned Expand all on a
+      // previous run.
+      autoCollapseRef.current = true;
+      setStepLogs({});
+      setStepStates(prev => {
+        const next = {};
+        activeStage.steps.forEach(s => {
+          next[s.id] = { status: STEP_STATUS_PENDING, progress: 0 };
+        });
+        return next;
+      });
+      // Pre-expand the first step's console so the user sees a
+      // "Waiting for output…" placeholder immediately. Without this, the
+      // console only opens when the SSE `step_status:running` event for
+      // step 1 arrives, which is several hundred ms later — the user reads
+      // that delay as the first step "taking time to open".
+      const firstStepId = activeStage.steps[0]?.id;
+      setExpanded(firstStepId ? { [firstStepId]: true } : {});
+      setCurrentStepId(firstStepId || null);
+      setJobId(newJob.id);
+      setJob(newJob);
+      setJobStatus(newJob.status);
+      connectStream(newJob.id);
+      toast(`Job ${fmtShortId(newJob.id)} started`, 'success');
+    } catch (e) {
+      toast(`Run failed: ${e.message}`, 'error');
+    }
+  }, [activeStage, journey, connectStream, toast]);
+
+  const onCancel = useCallback(async () => {
+    if (!jobId) return;
+    try { await api.cancelJob(journeyId, jobId); toast('Cancel requested', 'success'); }
+    catch (e) { toast(`Cancel failed: ${e.message}`, 'error'); }
+  }, [jobId, journeyId, toast]);
+
+  const toggleExpanded = useCallback((sid) => {
+    setExpanded(prev => ({ ...prev, [sid]: !prev[sid] }));
+  }, []);
+
+  const expandAll = useCallback(() => {
+    if (!activeStage) return;
+    // Pin auto-collapse off so the next step_status:running event doesn't
+    // immediately tear down the user's manual expansion.
+    autoCollapseRef.current = false;
+    const next = {};
+    activeStage.steps.forEach(s => { next[s.id] = true; });
+    setExpanded(next);
+  }, [activeStage]);
+
+  const collapseAll = useCallback(() => {
+    // Re-enable auto-collapse so subsequent live runs revert to the
+    // GitHub-Actions-style single-open behaviour.
+    autoCollapseRef.current = true;
+    setExpanded({});
+  }, []);
+
+  if (error) return <div className="page"><div className="empty"><h3>Could not load journey</h3><p className="mono">{error}</p></div></div>;
+  if (!journey) return <div className="page"><div className="empty">Loading…</div></div>;
+
+  const stepCount = activeStage?.steps.length || 0;
+  const currentIdx = activeStage ? activeStage.steps.findIndex(s => s.id === currentStepId) : -1;
+  const isRunning = jobStatus === 'running' || jobStatus === 'queued';
+
+  return (
+    <div className="page">
+      <div className="row mt-12" style={{ justifyContent: 'space-between' }}>
+        <div>
+          <button className="btn btn--ghost" onClick={() => navigate('#/')}>← Back</button>
+          <span style={{ marginLeft: 12 }}>
+            <span style={{ fontSize: 20, fontWeight: 700 }}>{journey.name}</span>
+            <span className="pill pill--created" style={{ marginLeft: 10 }}>v2 preview</span>
+            <span className="mono muted" style={{ marginLeft: 10 }}>{fmtShortId(journey.id, 12)}</span>
+          </span>
+        </div>
+        <div className="row">
+          <span className={cx('pill', sseStatus === 'connected' ? 'pill--running' : sseStatus === 'connecting' ? 'pill--queued' : sseStatus === 'disconnected' ? 'pill--failed' : 'pill--pending')}>
+            sse: {sseStatus}
+          </span>
+          <button className="btn" onClick={() => navigate(`#/journey/${journey.id}`)}>← v1 view</button>
+          <button className="btn btn--ghost" onClick={loadJourney}>↻ Refresh</button>
+        </div>
+      </div>
+
+      <div className="studio mt-20">
+        <div className="studio__sidebar">
+          <h3>Processing Stages</h3>
+          {journey.stages.map(s => (
+            <div
+              key={s.id}
+              className={cx('stage-entry', s.id === activeStageId && 'stage-entry--active')}
+              onClick={() => setActiveStageId(s.id)}
+            >
+              <div className="stage-entry__name">{s.name}</div>
+              <div className="stage-entry__meta">
+                <span className={cx('pill', `pill--${s.status}`)}>{s.status}</span>
+                <span className="muted"> · {s.steps.length} step{s.steps.length === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="studio__main">
+          {!activeStage ? (
+            <div className="empty"><h3>No stages yet</h3></div>
+          ) : (
+            <>
+              <div className="stage-header">
+                <div className="stage-header__title">{activeStage.name}</div>
+                {activeStage.description && <div className="stage-header__desc">{activeStage.description}</div>}
+                <div className="stage-header__actions">
+                  {!isRunning && (
+                    <button className="btn btn--primary" onClick={onStart}>▶ Start Processing</button>
+                  )}
+                  {isRunning && (
+                    <button className="btn btn--danger" onClick={onCancel}>■ Cancel</button>
+                  )}
+                  <button className="btn" onClick={() => navigate(`#/journey/${journey.id}/jobs`)}>View All Jobs</button>
+                  <div className="grow" />
+                  <button className="btn btn--ghost btn--small" onClick={expandAll}>Expand all</button>
+                  <button className="btn btn--ghost btn--small" onClick={collapseAll}>Collapse all</button>
+                </div>
+              </div>
+
+              {isRunning && currentStepId && currentIdx >= 0 && (
+                <div className="run-banner">
+                  <span className="run-banner__spinner" />
+                  <span>
+                    Processing step <strong>{currentIdx + 1}</strong> of <strong>{stepCount}</strong>:{' '}
+                    <strong>{activeStage.steps[currentIdx]?.name}</strong>
+                  </span>
+                  <div className="grow" />
+                  {(() => {
+                    const st = stepStates[currentStepId];
+                    const pct = Math.max(0, Math.min(100, st?.progress ?? 0));
+                    return (
+                      <>
+                        {(st?.current != null && st?.total != null) && (
+                          <span className="muted mono" style={{ marginRight: 8 }}>{st.current}/{st.total}</span>
+                        )}
+                        <div className="progress"><div className="progress__bar" style={{ width: `${pct}%` }} /></div>
+                        <span className="muted mono" style={{ marginLeft: 8, minWidth: 36, textAlign: 'right' }}>{pct}%</span>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+
+              <div className="stepper">
+                {activeStage.steps.map((step, i) => {
+                  const st = stepStates[step.id] || { status: STEP_STATUS_PENDING, progress: 0 };
+                  const isCurrent = step.id === currentStepId;
+                  const isLast = i === activeStage.steps.length - 1;
+                  const logs = stepLogs[step.id] || [];
+                  const isExpanded = !!expanded[step.id];
+                  const lf = levelFilter[step.id] || 'all';
+                  return (
+                    <div
+                      key={step.id}
+                      className={cx('stepper__row', `stepper__row--${st.status}`, isCurrent && 'stepper__row--current')}
+                      ref={(el) => { stepRefs.current[step.id] = el; }}
+                    >
+                      <div className="stepper__rail">
+                        <div className={cx('stepper__node', `stepper__node--${st.status}`)}>
+                          {st.status === STEP_STATUS_COMPLETED ? '✓'
+                            : st.status === STEP_STATUS_FAILED ? '!'
+                            : st.status === STEP_STATUS_RUNNING ? <span className="stepper__spinner" />
+                            : (i + 1)}
+                        </div>
+                        {!isLast && <div className={cx('stepper__line', `stepper__line--${st.status}`)} />}
+                      </div>
+                      <div className="stepper__card">
+                        <div className="stepper__cardhead">
+                          <div>
+                            <div className="stepper__name">
+                              {step.name}
+                              {st.status === STEP_STATUS_RUNNING && <span className="badge badge--running">Active</span>}
+                              {st.status === STEP_STATUS_COMPLETED && <span className="badge badge--done">Done</span>}
+                              {st.status === STEP_STATUS_FAILED && <span className="badge badge--failed">Failed</span>}
+                              {st.status === STEP_STATUS_PENDING && <span className="badge badge--pending">Pending</span>}
+                            </div>
+                            {step.description && <div className="stepper__desc">{step.description}</div>}
+                          </div>
+                          <button
+                            className={cx('btn btn--small', st.status === STEP_STATUS_RUNNING && 'btn--primary')}
+                            onClick={() => toggleExpanded(step.id)}
+                          >
+                            {isExpanded ? '▾' : '▸'} Logs ({logs.length})
+                          </button>
+                        </div>
+                        {st.status === STEP_STATUS_RUNNING && (
+                          <div className="stepper__progress">
+                            <div className="progress"><div className="progress__bar" style={{ width: `${Math.max(0, Math.min(100, st.progress || 0))}%` }} /></div>
+                            <span className="muted mono">{Math.max(0, Math.min(100, st.progress || 0))}%</span>
+                          </div>
+                        )}
+                        {isExpanded && (
+                          <StepConsoleV2
+                            stepId={step.id}
+                            stepName={step.name}
+                            status={st.status}
+                            logs={logs}
+                            levelFilter={lf}
+                            onLevelFilterChange={(v) => setLevelFilter(prev => ({ ...prev, [step.id]: v }))}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────────────── App shell ─────────────────────── */
 
 function App() {
@@ -937,12 +1873,13 @@ function App() {
 
   let view;
   switch (route.name) {
-    case 'journeys':  view = <JourneysListPage />; break;
-    case 'studio':    view = <JourneyStudioPage journeyId={route.journeyId} />; break;
-    case 'jobs':      view = <JobHistoryPage journeyId={route.journeyId} />; break;
-    case 'schedules': view = <SchedulesPage />; break;
-    case 'prompts':   view = <PromptsPage />; break;
-    default:          view = <JourneysListPage />;
+    case 'journeys':   view = <JourneysListPage />; break;
+    case 'studio':     view = <JourneyStudioPage journeyId={route.journeyId} />; break;
+    case 'studio_v2':  view = <JourneyStudioV2Page journeyId={route.journeyId} />; break;
+    case 'jobs':       view = <JobHistoryPage journeyId={route.journeyId} />; break;
+    case 'schedules':  view = <SchedulesPage />; break;
+    case 'prompts':    view = <PromptsPage />; break;
+    default:           view = <JourneysListPage />;
   }
 
   return (

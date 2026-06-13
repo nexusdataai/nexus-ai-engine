@@ -620,12 +620,18 @@ class InMemoryEngine:
                 step.status = JobStatus.running
                 step.started_at = _now()
                 await self.sse.broadcast(
-                    emit("step_status", job.id, step.step_id, status="running", progress=0)
+                    emit(
+                        "step_status",
+                        job.id,
+                        step.step_id,
+                        status="running",
+                        progress=0,
+                        step_index=idx,
+                    )
                 )
-                self._append_log(job.id, LogEntry(
-                    timestamp=_now(), level="INFO", step_id=step.step_id,
-                    message=f"Starting step {step.step_id}",
-                ))
+                await self._log_emit(
+                    job, step.step_id, "INFO", f"Starting step {step.step_id}"
+                )
 
                 if tool is not None and step_def is not None:
                     # ── Deterministic tool path ─────────────────────────
@@ -636,12 +642,21 @@ class InMemoryEngine:
                         step.ended_at = _now()
                         step.error = str(failure) or "Step failed"
                         errors += 1
-                        self._append_log(job.id, LogEntry(
-                            timestamp=_now(), level="ERROR", step_id=step.step_id,
-                            message=f"Step {step.step_id} failed: {step.error}",
-                        ))
+                        await self._log_emit(
+                            job,
+                            step.step_id,
+                            "ERROR",
+                            f"Step {step.step_id} failed: {step.error}",
+                        )
                         await self.sse.broadcast(
-                            emit("step_status", job.id, step.step_id, status="failed", error=step.error)
+                            emit(
+                                "step_status",
+                                job.id,
+                                step.step_id,
+                                status="failed",
+                                error=step.error,
+                                step_index=idx,
+                            )
                         )
                         completed_ok = False
                         break
@@ -658,12 +673,18 @@ class InMemoryEngine:
                         1 for e in self.job_logs.get(job.id, []) if e.step_id == step.step_id
                     )
                     await self.sse.broadcast(
-                        emit("step_status", job.id, step.step_id, status="completed", progress=100)
+                        emit(
+                            "step_status",
+                            job.id,
+                            step.step_id,
+                            status="completed",
+                            progress=100,
+                            step_index=idx,
+                        )
                     )
-                    self._append_log(job.id, LogEntry(
-                        timestamp=_now(), level="INFO", step_id=step.step_id,
-                        message=f"Completed step {step.step_id}",
-                    ))
+                    await self._log_emit(
+                        job, step.step_id, "INFO", f"Completed step {step.step_id}"
+                    )
                     continue
 
                 # ── Random-simulation fallback (existing UI-demo behavior) ──
@@ -677,13 +698,21 @@ class InMemoryEngine:
                     step.progress = pct
                     job.progress = int(((idx + (pct / 100.0)) / total_steps) * 100)
                     msg = _sample_log_line(step.step_id, tick)
-                    self._append_log(job.id, LogEntry(
-                        timestamp=_now(), level="INFO", step_id=step.step_id, message=msg,
-                    ))
-                    step.log_count = sum(1 for e in self.job_logs[job.id] if e.step_id == step.step_id)
                     calls_processed += random.randint(8, 25)
+                    # Emit a clean task_progress (no message) and a separate
+                    # log event. The legacy v1 UI also reads `message` off
+                    # task_progress, so keep it for one release.
+                    await self._log_emit(job, step.step_id, "INFO", msg)
                     await self.sse.broadcast(
-                        emit("task_progress", job.id, step.step_id, progress=pct, message=msg)
+                        emit(
+                            "task_progress",
+                            job.id,
+                            step.step_id,
+                            progress=pct,
+                            current=tick,
+                            total=ticks,
+                            message=msg,
+                        )
                     )
 
                 if job.id in self._cancel_flags:
@@ -696,12 +725,21 @@ class InMemoryEngine:
                     step.ended_at = _now()
                     step.error = "Simulated transient failure"
                     errors += 1
-                    self._append_log(job.id, LogEntry(
-                        timestamp=_now(), level="ERROR", step_id=step.step_id,
-                        message=f"Step {step.step_id} failed: simulated transient failure",
-                    ))
+                    await self._log_emit(
+                        job,
+                        step.step_id,
+                        "ERROR",
+                        f"Step {step.step_id} failed: simulated transient failure",
+                    )
                     await self.sse.broadcast(
-                        emit("step_status", job.id, step.step_id, status="failed", error=step.error)
+                        emit(
+                            "step_status",
+                            job.id,
+                            step.step_id,
+                            status="failed",
+                            error=step.error,
+                            step_index=idx,
+                        )
                     )
                     completed_ok = False
                     break
@@ -710,12 +748,18 @@ class InMemoryEngine:
                 step.ended_at = _now()
                 step.progress = 100
                 await self.sse.broadcast(
-                    emit("step_status", job.id, step.step_id, status="completed", progress=100)
+                    emit(
+                        "step_status",
+                        job.id,
+                        step.step_id,
+                        status="completed",
+                        progress=100,
+                        step_index=idx,
+                    )
                 )
-                self._append_log(job.id, LogEntry(
-                    timestamp=_now(), level="INFO", step_id=step.step_id,
-                    message=f"Completed step {step.step_id}",
-                ))
+                await self._log_emit(
+                    job, step.step_id, "INFO", f"Completed step {step.step_id}"
+                )
 
             # Terminal state
             now = _now()
@@ -788,7 +832,36 @@ class InMemoryEngine:
             self._running_tasks.pop(job.id, None)
 
     def _append_log(self, job_id: str, entry: LogEntry) -> None:
+        # Per-step grouping in the v2 UI and in the production prod UI both
+        # require `step_id` on every log line. Reject silent gaps now so a
+        # future stage that forgets to tag its logs fails loudly in tests
+        # rather than producing an empty "Logs (0)" panel in the browser.
+        if not entry.step_id:
+            raise ValueError(
+                "LogEntry.step_id is required; logs without a step cannot be "
+                "grouped in the v2 UI"
+            )
         self.job_logs.setdefault(job_id, []).append(entry)
+
+    async def _log_emit(
+        self, job: Job, step_id: str, level: str, message: str
+    ) -> None:
+        """Append a log entry AND broadcast a dedicated `log` SSE event.
+
+        Pairs the persistent log buffer (`get_job_logs` / REST fallback) with
+        the live stream so the v2 UI can render per-step lines in real time.
+        Updates the matching `StepResult.log_count` so badge counters stay
+        in sync without a per-tick recount over `self.job_logs`.
+        """
+        entry = LogEntry(timestamp=_now(), level=level, step_id=step_id, message=message)
+        self._append_log(job.id, entry)
+        for sr in job.step_results:
+            if sr.step_id == step_id:
+                sr.log_count += 1
+                break
+        await self.sse.broadcast(
+            emit("log", job.id, step_id, level=level, message=message)
+        )
 
 
 _LOG_TEMPLATES = [

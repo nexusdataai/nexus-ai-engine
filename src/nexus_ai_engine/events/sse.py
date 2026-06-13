@@ -86,7 +86,23 @@ class SSEManager:
 
 
 def _format_sse(payload: Any) -> str:
-    return f"data: {json.dumps(payload, default=str)}\n\n"
+    """Format an event payload as TWO SSE frames.
+
+    Emits both a named-event frame (``event: <type>\\ndata: ...``) and a
+    default-channel frame (``data: ...``). Browsers route the named frame to
+    ``EventSource.addEventListener('<type>', ...)`` listeners (production
+    `jobStreamService` / new ``JourneyStudioV2Page``); the default frame
+    fires ``EventSource.onmessage`` (legacy ``LogsDrawer``). Each frame
+    carries the same JSON body so both paths see every event exactly once.
+    """
+    body = json.dumps(payload, default=str)
+    if isinstance(payload, dict):
+        name = payload.get("type") or ""
+    else:
+        name = ""
+    if name:
+        return f"event: {name}\ndata: {body}\n\ndata: {body}\n\n"
+    return f"data: {body}\n\n"
 
 
 def emit(event_type: str, job_id: str, step_id: str | None = None, **data: Any) -> JobEvent:

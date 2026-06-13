@@ -78,6 +78,7 @@ set_defaults() {
     : "${IMAGE_TAG:=}"
     : "${ACCOUNT_ID:=}"
     : "${DRY_RUN:=false}"
+    : "${COMPONENT:=ai-engine}"
 }
 
 # ── Helpers ──────────────────────────────────────────────────────────────

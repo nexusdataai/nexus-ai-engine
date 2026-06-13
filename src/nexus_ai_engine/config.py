@@ -1,11 +1,23 @@
 """EngineConfig — application-provided settings for the engine.
 
-The library never reads environment variables or SSM/Secrets by itself. Host
-applications build an ``EngineConfig`` from whichever source they prefer and
-pass it to ``nexus_ai_engine.factory.build_engine``. The library exposes a
-process-wide singleton via ``set_config()`` / ``get_config()`` so that
-service modules ported from nexus-backend can keep their existing
-``from ..config import get_config`` import shape.
+The library itself remains injection-only: host applications build an
+``EngineConfig`` from whichever source they prefer and pass it to
+``nexus_ai_engine.factory.build_engine``. ``set_config()`` /
+``get_config()`` expose a process-wide singleton so service modules ported
+from nexus-backend keep their existing ``from ..config import get_config``
+import shape.
+
+The reference CLI (``nexus-ai-engine serve``) provides two opt-in
+bootstrap paths on top of that contract:
+
+- Default: read ``EngineConfig`` fields from environment variables
+  (``DYNAMODB_TRANSFORMATION_TABLE``, ``S3_JOURNEY_LOGS_BUCKET``, etc.).
+- ``--ssm-prefix /ai-engine/{env}/`` (or ``SSM_PARAMETER_PREFIX``):
+  read fields from AWS SSM Parameter Store via boto3, with env-var
+  fallback per key. Used by the K8s deployment so operators only need to
+  manage one set of values per environment in SSM.
+
+Direct callers of :func:`build_engine` are unaffected by either path.
 """
 
 from __future__ import annotations

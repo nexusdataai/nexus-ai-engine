@@ -65,6 +65,40 @@ That creates:
 
 See [../iam/README.md](../iam/README.md) for full admin instructions.
 
+## Prerequisite — SSM parameters per environment
+
+The pod bootstraps `EngineConfig` from SSM Parameter Store at startup
+(`nexus-ai-engine serve --ssm-prefix /ai-engine/${ENV}/`, wired in
+[deployment.yaml](deployment.yaml)). Before applying the manifest for a
+new environment, seed the parameters once:
+
+```bash
+./deploy/admin/seed-ssm-parameters.sh dev us-east-1
+```
+
+That writes the following keys under `/ai-engine/dev/`:
+
+| Parameter | Default value |
+|-----------|---------------|
+| `dynamodb_transformation_table` | `ai-engine-journeys-dev`         |
+| `dynamodb_prompts_table`        | `ai-engine-journeys-dev`         |
+| `s3_journey_logs_bucket`        | `ai-engine-journeys-logs-dev`    |
+| `s3_journey_reports_bucket`     | `ai-engine-journeys-reports-dev` |
+| `environment`                   | `dev`                            |
+| `max_concurrent_jobs`           | `10`                             |
+| `capability_name`               | `call-processing`                |
+
+Override any value before deploy by either editing the script or running
+`aws ssm put-parameter --overwrite` directly. Per-key `DYNAMODB_*` /
+`S3_*` environment variables on the Deployment still act as fallbacks for
+any field absent from SSM (see `_SSM_TO_ENV_FALLBACK` in
+[../../src/nexus_ai_engine/server/cli.py](../../src/nexus_ai_engine/server/cli.py)).
+
+To disable SSM bootstrap entirely (for example, when bringing up a pod
+against env-vars only), clear `SSM_PARAMETER_PREFIX` in
+[configmap.yaml](configmap.yaml) — the CLI then falls back to its
+original env-var-only path.
+
 ## What you must replace before applying
 
 | Placeholder | Replacement | Patched by |
@@ -110,6 +144,40 @@ kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000
 
 Then visit `http://localhost:8000/ui` in a browser. See
 [docs/UI.md](../../docs/UI.md) for the full feature list and architecture.
+
+## Bundled demo stages (default ON)
+
+The standalone deploy registers 7 synthetic stages at startup
+(`order_to_cash`, `call_ingest`, `transcribe`, `analyze`, `demand_forecast`,
+`inventory_opt`, `supply_risk`) so the embedded UI is immediately runnable
+for performance / smoke testing without a host application registering
+domain stages. Each step does bounded synthetic work — a random sleep
+plus an `emit_log` per tick — and exercises the same `BaseStage` →
+DynamoDB-LIVELOG → S3 → SSE path the production stages use.
+
+To populate matching journeys after a fresh deploy:
+
+```bash
+POD=$(kubectl -n ai-engine get pod -l app.kubernetes.io/name=nexus-ai-engine -o jsonpath='{.items[0].metadata.name}')
+kubectl -n ai-engine cp scripts/seed-sample-journeys.sh "$POD":/tmp/seed.sh
+kubectl -n ai-engine exec "$POD" -- bash /tmp/seed.sh
+```
+
+The seed script invokes `nexus-ai-engine print-demo-journeys` inside the
+pod to read the same canonical journey definitions the runtime registers
+stage classes from — so the seeded stage_ids always match runnable demo
+stages and clicking "Start Processing" in the v2 UI executes the steps
+end-to-end.
+
+**Disable the demos** once a host (e.g. `nexus-backend`) is registering
+real domain stages — leaving demos on would shadow the real
+implementations for any matching `stage_id`. Two ways:
+
+| Where | How |
+|-------|-----|
+| ConfigMap (durable) | Set `REGISTER_DEMO_STAGES: "false"` in [configmap.yaml](configmap.yaml) and `kubectl rollout restart deploy/nexus-ai-engine -n ai-engine` |
+| One-off | `kubectl set env -n ai-engine deploy/nexus-ai-engine REGISTER_DEMO_STAGES=false` |
+| Per-invocation | Add `--no-register-demo-stages` to the args in [deployment.yaml](deployment.yaml) |
 
 ## Run tests inside the pod
 

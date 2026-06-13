@@ -18,10 +18,31 @@ data:
   API_PORT: "8000"
   MAX_CONCURRENT_JOBS: "10"
 
-  # Resource names follow the convention: ai-engine-journeys-${ENV}-*
-  # The library distinguishes journeys/jobs/live-logs/reports/prompts by
-  # PK prefix within the same DynamoDB table.
-  DYNAMODB_TRANSFORMATION_TABLE: "ai-engine-journeys-${ENV}"
-  DYNAMODB_PROMPTS_TABLE: "ai-engine-journeys-${ENV}"
-  S3_JOURNEY_LOGS_BUCKET: "ai-engine-journeys-logs-${ENV}"
-  S3_JOURNEY_REPORTS_BUCKET: "ai-engine-journeys-reports-${ENV}"
+  # The pod bootstraps EngineConfig from SSM Parameter Store using this
+  # prefix (consumed by `nexus-ai-engine serve --ssm-prefix
+  # $(SSM_PARAMETER_PREFIX)` in deployment.yaml). Operators must pre-seed
+  # the parameters with `deploy/admin/seed-ssm-parameters.sh ${ENV}` before
+  # the Deployment can come up healthy.
+  #
+  # Expected parameters under this prefix:
+  #   dynamodb_transformation_table   ai-engine-journeys-${ENV}
+  #   dynamodb_prompts_table          ai-engine-journeys-${ENV}
+  #   s3_journey_logs_bucket          ai-engine-journeys-logs-${ENV}
+  #   s3_journey_reports_bucket       ai-engine-journeys-reports-${ENV}
+  #
+  # Per-key DYNAMODB_* / S3_* environment variables still act as overrides
+  # for any field absent from SSM (see _SSM_TO_ENV_FALLBACK in
+  # src/nexus_ai_engine/server/cli.py).
+  SSM_PARAMETER_PREFIX: "/ai-engine/${ENV}/"
+
+  # Register the synthetic demo stages bundled with the library
+  # (order_to_cash, call_ingest, transcribe, analyze, demand_forecast,
+  # inventory_opt, supply_risk). Each step does bounded synthetic work
+  # (random sleep + emit_log per tick) so a fresh standalone pod is
+  # immediately runnable for performance / smoke testing without a host
+  # application registering domain stages.
+  #
+  # Set to "false" once nexus-backend (or another host) is registering
+  # real domain stages — leaving demos on would shadow the real
+  # implementations for any matching stage_id.
+  REGISTER_DEMO_STAGES: "true"

@@ -1,0 +1,15 @@
+=== ENV A local :8002 2026-08-02T12:27:22+00:00 ===
+{"status":"ok","version":"0.1.0a2"}
+{"name":"nexus-ai-engine","service":"nexus-ai-engine","version":"0.1.0a2","env":"dev","git_sha":"unknown"}
+{"ready":true,"version":"0.1.0a2","checks":{"engine":{"status":"ok"},"tool_registry":{"status":"ok","stages":7},"dynamodb":{"status":"skipped","reason":"in_memory_engine"}}}
+# HELP nexus_ai_engine_build_info Nexus AI Engine build information
+# TYPE nexus_ai_engine_build_info gauge
+journeys_count=5
+capabilities: ['call-processing', 'demand-forecasting', 'inventory-optimization', 'order-to-cash', 'supply-chain-risk']
+id="root"
+/ui/assets/app.js
+
+=== ENV B cluster port-forward :8001 ===
+{"status":"ok","version":"0.1.0a2"}
+{"name":"nexus-ai-engine","service":"nexus-ai-engine","version":"0.1.0a2","env":"dev","git_sha":"unknown"}
+journeys: 5

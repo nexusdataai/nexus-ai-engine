@@ -98,6 +98,7 @@ class JourneyStep(BaseModel):
     tool: str | None = None
     type: StepKind | None = None
     params: dict[str, Any] = Field(default_factory=dict)
+    logic: str | None = None
     output: str | None = None
     foreach: str | None = None
     condition: str | None = None
@@ -170,10 +171,19 @@ class JourneyDefinition(BaseModel):
 JourneyStep.model_rebuild()
 
 
-def _walk_steps(steps: list[JourneyStep]) -> list[JourneyStep]:
+def walk_steps(steps: list[JourneyStep]) -> list[JourneyStep]:
+    """Return all steps in a stage, including nested parallel groups."""
     out: list[JourneyStep] = []
     for step in steps:
         out.append(step)
         if step.steps:
-            out.extend(_walk_steps(step.steps))
+            out.extend(walk_steps(step.steps))
     return out
+
+
+# Public aliases (build plan / spec naming)
+Journey = JourneyDefinition
+Stage = JourneyStage
+Step = JourneyStep
+
+_walk_steps = walk_steps  # backward compat for internal callers

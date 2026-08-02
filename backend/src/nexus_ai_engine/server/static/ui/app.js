@@ -400,30 +400,210 @@ function parseRoute(hash) {
   return { name: 'journeys' };
 }
 
-/* ─────────────────────── Top bar ─────────────────────── */
+/* ─────────────────────── Theme (nexus-sre / nexus-ui parity) ─────────────────────── */
 
-function TopBar({ route }) {
+function useTheme() {
+  const [theme, setTheme] = useState(() => {
+    const saved = localStorage.getItem('nexus-ai-engine-theme');
+    return saved === 'light' ? 'light' : 'dark';
+  });
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove('light', 'dark');
+    root.classList.add(theme);
+    root.style.colorScheme = theme;
+    localStorage.setItem('nexus-ai-engine-theme', theme);
+  }, [theme]);
+  const toggle = useCallback(() => setTheme(t => (t === 'dark' ? 'light' : 'dark')), []);
+  return { theme, toggle };
+}
+
+function NexusLogo({ className = 'sidebar__logo-svg', gradId = 'neLogoGrad' }) {
+  return (
+    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
+      <defs>
+        <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#7c3aed" />
+          <stop offset="100%" stopColor="#4f46e5" />
+        </linearGradient>
+      </defs>
+      <path d="M16 1 L29 8.5 L29 23.5 L16 31 L3 23.5 L3 8.5 Z" fill={`url(#${gradId})`} />
+      <path d="M16 7 L12 12 L16 17 L20 12 Z" fill="white" opacity="0.9" />
+      <path d="M12 14 L9 19 L16 25 L12 18 Z" fill="white" opacity="0.7" />
+      <path d="M20 14 L23 19 L16 25 L20 18 Z" fill="white" opacity="0.7" />
+    </svg>
+  );
+}
+
+const ROUTE_TITLES = {
+  journeys: 'Journeys',
+  studio: 'Journey Studio',
+  studio_v2: 'Live view',
+  jobs: 'Job history',
+  schedules: 'Schedules',
+  prompts: 'Prompts',
+};
+
+const SIDEBAR_MENU = [
+  {
+    label: 'JOURNEY STUDIO',
+    items: [
+      { id: 'journeys', name: 'Journeys', hash: '#/', routes: ['journeys', 'studio', 'studio_v2', 'jobs'], icon: 'grid' },
+      { id: 'schedules', name: 'Schedules', hash: '#/schedules', routes: ['schedules'], icon: 'clock' },
+      { id: 'prompts', name: 'Prompts', hash: '#/prompts', routes: ['prompts'], icon: 'file' },
+    ],
+  },
+];
+
+function SidebarIcon({ name }) {
+  const paths = {
+    grid: <><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></>,
+    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+    file: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></>,
+    settings: <><circle cx="12" cy="12" r="3" /><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></>,
+    help: <><circle cx="12" cy="12" r="9" /><path d="M9.5 9a2.5 2.5 0 1 1 4.2 1.8c-.8.7-1.7 1.5-1.7 2.7" /><circle cx="12" cy="17" r="0.5" fill="currentColor" /></>,
+    chevronLeft: <path d="M15 6l-6 6 6 6" />,
+    chevronRight: <path d="M9 6l6 6-6 6" />,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" /></>,
+    moon: <path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 7 7 0 0 0 21 14.5z" />,
+  };
+  return (
+    <svg className="sidebar__icon" viewBox="0 0 24 24" aria-hidden="true">
+      {paths[name]}
+    </svg>
+  );
+}
+
+function Sidebar({ route, mini, onToggleMini }) {
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpRef = useRef(null);
+
+  useEffect(() => {
+    if (!helpOpen) return;
+    const close = (e) => {
+      if (helpRef.current && !helpRef.current.contains(e.target)) setHelpOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [helpOpen]);
+
+  const isActive = (item) => item.routes.includes(route.name);
+
+  return (
+    <aside className={cx('sidebar', mini ? 'sidebar--mini' : 'sidebar--wide')} aria-label="Primary navigation">
+      <div className="sidebar__head">
+        <NexusLogo gradId={mini ? 'neLogoMini' : 'neLogoGrad'} />
+        {!mini && (
+          <>
+            <div className="sidebar__brand">Nexus AI Engine</div>
+            <button type="button" className="sidebar__collapse" onClick={onToggleMini} aria-label="Collapse sidebar">
+              <SidebarIcon name="chevronLeft" />
+            </button>
+          </>
+        )}
+        {mini && (
+          <button type="button" className="sidebar__collapse sidebar__expand" onClick={onToggleMini} aria-label="Expand sidebar">
+            <SidebarIcon name="chevronRight" />
+          </button>
+        )}
+      </div>
+
+      <nav className="sidebar__nav">
+        {SIDEBAR_MENU.map(section => (
+          <div key={section.label}>
+            {mini ? (
+              <div className="sidebar__section-divider" />
+            ) : (
+              <div className="sidebar__section-label">{section.label}</div>
+            )}
+            {section.items.map(item => (
+              <a
+                key={item.id}
+                href={item.hash}
+                className={cx('sidebar__item', isActive(item) && 'sidebar__item--active')}
+                title={mini ? item.name : undefined}
+              >
+                <SidebarIcon name={item.icon} />
+                {!mini && <span>{item.name}</span>}
+              </a>
+            ))}
+          </div>
+        ))}
+      </nav>
+
+      <div className="sidebar__footer">
+        <button
+          type="button"
+          className="sidebar__item"
+          title={mini ? 'Settings' : undefined}
+          onClick={() => window.alert('Settings are not available in the embedded dev UI (v0.2.0-alpha). Use port-forward for local testing.')}
+        >
+          <SidebarIcon name="settings" />
+          {!mini && <span>Settings</span>}
+        </button>
+        <div className="sidebar__help-wrap" ref={helpRef}>
+          <button
+            type="button"
+            className="sidebar__item"
+            title={mini ? 'Help' : undefined}
+            onClick={() => setHelpOpen(o => !o)}
+          >
+            <SidebarIcon name="help" />
+            {!mini && <span>Help</span>}
+          </button>
+          {helpOpen && (
+            <div className="sidebar__popover">
+              <a href="/health" target="_blank" rel="noopener noreferrer">API health</a>
+              <a href="/version" target="_blank" rel="noopener noreferrer">Version info</a>
+              <a href="/metrics" target="_blank" rel="noopener noreferrer">Metrics</a>
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function AppHeader({ route, theme, onToggleTheme, version }) {
+  return (
+    <header className="app-header">
+      <h1 className="app-header__title">{ROUTE_TITLES[route.name] || 'Journey Studio'}</h1>
+      <div className="app-header__utilities">
+        <span className="env-badge">dev UI</span>
+        <button
+          type="button"
+          className="app-header__btn"
+          onClick={onToggleTheme}
+          title="Toggle theme"
+          aria-label="Toggle theme"
+        >
+          <SidebarIcon name={theme === 'dark' ? 'sun' : 'moon'} />
+        </button>
+        <span className="version-badge">v{version}</span>
+      </div>
+    </header>
+  );
+}
+
+function AppShell({ route, children }) {
+  const { theme, toggle } = useTheme();
+  const [mini, setMini] = useState(() => localStorage.getItem('nexus-ai-engine-sidebar') === 'mini');
   const [version, setVersion] = useState('…');
+
   useEffect(() => {
     fetch('/version').then(r => r.json()).then(v => setVersion(v.version)).catch(() => {});
   }, []);
-  const navItem = (hash, name, label) => (
-    <a href={hash} className={route.name === name ? 'active' : ''}>{label}</a>
-  );
+
+  useEffect(() => {
+    localStorage.setItem('nexus-ai-engine-sidebar', mini ? 'mini' : 'wide');
+  }, [mini]);
+
   return (
-    <div className="top-bar">
-      <div className="top-bar__logo">
-        <div className="top-bar__logo-badge">NE</div>
-        <div>Nexus AI Engine</div>
-      </div>
-      <div className="top-bar__nav">
-        {navItem('#/', 'journeys', 'Journeys')}
-        {navItem('#/schedules', 'schedules', 'Schedules')}
-        {navItem('#/prompts', 'prompts', 'Prompts')}
-      </div>
-      <div className="top-bar__right">
-        <span className="pf-badge">port-forward dev UI</span>
-        <span className="mono">v{version}</span>
+    <div className="app-shell">
+      <Sidebar route={route} mini={mini} onToggleMini={() => setMini(m => !m)} />
+      <div className="app-shell__body">
+        <AppHeader route={route} theme={theme} onToggleTheme={toggle} version={version} />
+        <main className="app-main">{children}</main>
       </div>
     </div>
   );
@@ -491,6 +671,10 @@ function JourneysListPage() {
 
   return (
     <div className="page">
+      <div className="page-header">
+        <h1 className="page-header__title">Journeys</h1>
+        <p className="page-header__subtitle">Browse, filter, and open DSL-defined execution journeys</p>
+      </div>
       <div className="filter-bar">
         <input
           className="input"
@@ -966,9 +1150,12 @@ function SchedulesPage() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>All schedules</div>
-        <button className="btn btn--ghost" onClick={load}>↻ Refresh</button>
+      <div className="page-header">
+        <h1 className="page-header__title">Schedules</h1>
+        <p className="page-header__subtitle">Batch schedules across all journeys</p>
+      </div>
+      <div className="row" style={{ justifyContent: 'flex-end' }}>
+        <button className="btn btn--ghost btn--small" onClick={load}>↻ Refresh</button>
       </div>
       <div className="col mt-20">
         {grouped.map(({ j, items }) => (
@@ -1026,9 +1213,12 @@ function PromptsPage() {
 
   return (
     <div className="page">
-      <div className="row" style={{ justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>Prompts catalog</div>
-        <button className="btn btn--danger" onClick={onReset}>Reset all to defaults</button>
+      <div className="page-header row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 className="page-header__title">Prompts</h1>
+          <p className="page-header__subtitle">System prompt templates and version history</p>
+        </div>
+        <button className="btn btn--danger btn--small" onClick={onReset}>Reset all to defaults</button>
       </div>
 
       <div className="prompt-editor mt-20">
@@ -1884,8 +2074,7 @@ function App() {
 
   return (
     <ToastProvider>
-      <TopBar route={route} />
-      {view}
+      <AppShell route={route}>{view}</AppShell>
     </ToastProvider>
   );
 }

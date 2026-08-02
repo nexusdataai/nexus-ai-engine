@@ -1,0 +1,30 @@
+=== set-context status ===
+KUBECONFIG:     /opt/mycode/nexus/nexus-deployer/aws-login/.kube/config
+AWS_PROFILE:    external-access
+AWS_REGION:     us-east-1
+Active env:     [3] Starhub BSSMagic
+Cluster:        prod-cluster
+Namespace:      nexus-ai-prod
+Context:        nexus-prod
+current-context: nexus-prod
+AWS account:    298722972165
+
+=== bump dry-run ===
+
+[1mVersion Bump[0m
+Target:      [1mai-engine-api[0m
+Bump:        [1mpatch[0m
+[1;33mDRY RUN — no changes will be made[0m
+
+[0;36m▶[0m [1mai-engine-api[0m  [2m(/opt/mycode/nexus/nexus-ai-engine/backend/VERSION)[0m
+  Current:   [2m0.1.1[0m
+  New:       [1m0.1.2[0m
+  [1;33m(dry-run, not written)[0m
+
+
+=== kubectl pods ===
+NAME                               READY   STATUS    RESTARTS   AGE    IP           NODE                         NOMINATED NODE   READINESS GATES
+nexus-ai-engine-84d75fb94c-kd5bm   1/1     Running   0          7m3s   10.0.10.66   ip-10-0-10-22.ec2.internal   <none>           <none>
+
+=== ECR describe ===
+latest	0.1.1-9e78bee

@@ -1,0 +1,131 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.3, pluggy-1.6.0
+Using --randomly-seed=196876024
+benchmark: 5.2.3 (defaults: timer=time.perf_counter disable_gc=False min_rounds=5 min_time=0.000005 max_time=1.0 calibration_precision=10 warmup=False warmup_iterations=100000)
+rootdir: /opt/mycode/nexus/nexus-ai-engine
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.13.0, json-report-1.5.0, nexus-simulator-0.1.0a1, xdist-3.8.0, randomly-4.1.0, cov-7.1.0, asyncio-1.3.0, metadata-3.1.1, mock-3.15.1, benchmark-5.2.3, hypothesis-6.152.4, html-4.2.0, nexus-ai-engine-0.2.0b0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 245 items
+
+tests/unit/test_errors.py .........                                      [  3%]
+tests/integration/test_executions_api.py ...                             [  4%]
+tests/integration/test_o2c_execution_e2e.py ..                           [  5%]
+tests/unit/test_factory.py ...                                           [  6%]
+tests/unit/test_ssm_config_loader.py ....                                [  8%]
+tests/property/test_aggregate_consistency.py .                           [  8%]
+tests/journeys/test_yaml_runs.py .............                           [ 14%]
+tests/property/test_counter_invariants.py .                              [ 14%]
+tests/property/test_log_ordering.py .                                    [ 15%]
+tests/contract/test_log_sink_contract.py ...                             [ 16%]
+tests/e2e/test_journey_ui_api.py ........                                [ 19%]
+tests/e2e/test_sse_stream.py ..                                          [ 20%]
+tests/unit/test_log_emission.py .....                                    [ 22%]
+tests/property/test_job_state_machine.py .                               [ 22%]
+tests/integration/test_demo_stage_end_to_end.py ..                       [ 23%]
+tests/integration/test_concurrent_same_engine.py .....                   [ 25%]
+tests/e2e/test_cancel_midstep.py .                                       [ 26%]
+tests/e2e/test_concurrent_jobs_single_journey.py .                       [ 26%]
+tests/e2e/test_ui_route_parity.py .............                          [ 31%]
+tests/endurance/test_many_jobs_one_journey.py ..                         [ 32%]
+tests/e2e/test_retry.py .                                                [ 33%]
+tests/contract/test_report_sink_contract.py ...                          [ 34%]
+tests/integration/test_production_router_mount.py ..                     [ 35%]
+tests/integration/test_journey_dsl_api.py ..                             [ 35%]
+tests/unit/test_journey_dsl_models.py ......                             [ 38%]
+tests/unit/test_in_memory_engine.py ........                             [ 41%]
+tests/e2e/test_concurrent_jobs_multi_journey.py .                        [ 42%]
+tests/property/test_cancellation_idempotency.py .                        [ 42%]
+tests/integration/test_journey_crud_flow.py ........                     [ 45%]
+tests/contract/test_journey_repo_contract.py ....                        [ 47%]
+tests/unit/test_journey_validator.py ....                                [ 48%]
+tests/integration/test_prompt_audit.py .....                             [ 51%]
+tests/unit/test_execution_fsm.py .................................       [ 64%]
+tests/unit/test_demo_stages.py ............                              [ 69%]
+tests/unit/test_smoke.py ..                                              [ 70%]
+tests/endurance/test_sustained_throughput.py .                           [ 70%]
+tests/endurance/test_many_jobs_many_journeys.py .                        [ 71%]
+tests/unit/test_health_observability.py .....                            [ 73%]
+tests/unit/test_execution_retry.py .                                     [ 73%]
+tests/integration/test_job_run_to_terminal.py ......                     [ 75%]
+tests/contract/test_module_structure.py ...                              [ 77%]
+tests/integration/test_schedule_end_to_end.py ...                        [ 78%]
+tests/e2e/test_full_lifecycle.py ..                                      [ 79%]
+tests/integration/test_journey_compiler.py ...                           [ 80%]
+tests/unit/test_dsl_journey_store.py ...                                 [ 81%]
+tests/e2e/test_error_paths.py ......                                     [ 84%]
+tests/endurance/test_sse_fanout.py .                                     [ 84%]
+tests/contracts/test_contracts.py ........                               [ 87%]
+tests/endurance/test_cancellation_storm.py .                             [ 88%]
+tests/endurance/test_heavy_scenarios.py ..                               [ 88%]
+tests/unit/test_config.py ......                                         [ 91%]
+tests/e2e/test_health.py ........                                        [ 94%]
+tests/endurance/test_log_volume.py ..                                    [ 95%]
+tests/endurance/test_smoke.py ..                                         [ 96%]
+tests/e2e/test_ui_static.py ....                                         [ 97%]
+tests/unit/test_package_structure.py .....                               [100%]
+
+=============================== warnings summary ===============================
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/stages/base_stage.py:213: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    'timestamp': datetime.utcnow().isoformat() + 'Z',
+
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/stages/base_stage.py:247: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    'updated_at': datetime.utcnow().isoformat() + 'Z',
+
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/stages/base_stage.py:248: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    'ttl': int(datetime.utcnow().timestamp()) + 3600,
+
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+tests/integration/test_demo_stage_end_to_end.py::test_order_to_cash_first_step_runs_and_writes_livelog
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/events/sse_manager.py:46: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp: str = field(default_factory=lambda: datetime.utcnow().isoformat() + 'Z')
+
+tests/integration/test_production_router_mount.py::test_production_engine_mounts_legacy_routers
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/models/api_models.py:64: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("odaComponentType")
+
+tests/integration/test_production_router_mount.py::test_production_engine_mounts_legacy_routers
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/models/api_models.py:141: PydanticDeprecatedSince20: `min_items` is deprecated and will be removed, use `min_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    journey_ids: List[str] = Field(..., min_items=1, max_items=100)
+
+tests/integration/test_production_router_mount.py::test_production_engine_mounts_legacy_routers
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/models/api_models.py:141: PydanticDeprecatedSince20: `max_items` is deprecated and will be removed, use `max_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    journey_ids: List[str] = Field(..., min_items=1, max_items=100)
+
+tests/integration/test_production_router_mount.py::test_production_engine_mounts_legacy_routers
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/models/api_models.py:175: PydanticDeprecatedSince20: `max_items` is deprecated and will be removed, use `max_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    group_by: Optional[List[str]] = Field(None, max_items=3)
+
+tests/integration/test_production_router_mount.py::test_production_engine_mounts_legacy_routers
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/models/api_models.py:177: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("end_time")
+
+tests/integration/test_production_router_mount.py::test_production_engine_mounts_legacy_routers
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/models/api_models.py:199: PydanticDeprecatedSince20: `min_items` is deprecated and will be removed, use `min_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    widgets: List[str] = Field(..., min_items=1, max_items=10)
+
+tests/integration/test_production_router_mount.py::test_production_engine_mounts_legacy_routers
+  /opt/mycode/nexus/nexus-ai-engine/backend/src/nexus_ai_engine/models/api_models.py:199: PydanticDeprecatedSince20: `max_items` is deprecated and will be removed, use `max_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    widgets: List[str] = Field(..., min_items=1, max_items=10)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 245 passed, 27 warnings in 58.46s =======================

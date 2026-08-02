@@ -1,0 +1,82 @@
+apiVersion: nexus.ai/v1
+kind: Journey
+metadata:
+  id: order-to-cash-monitor
+  version: 1
+  labels:
+    domain: finance
+    oda: order-management
+
+spec:
+  display_name: Order-to-Cash Monitor
+  description: |
+    Reference O2C monitoring journey: entity resolution through cash projection.
+  trigger: manual
+
+  defaults:
+    retry:
+      max_attempts: 3
+      initial_backoff_s: 2
+      max_backoff_s: 60
+    timeout_s: 300
+    on_failure: abort
+
+  concurrency:
+    max_parallel_runs: 2
+    max_parallel_steps: 4
+
+  stages:
+    - id: entity_resolution
+      name: Entity Resolution
+      description: Resolve CRM entities for matching
+      steps:
+        - id: fetch_opportunities
+          tool: query_virtual_entity
+          params:
+            entity: Opportunity
+            filter:
+              stage: Closed Won
+            limit: 500
+          output: opportunities
+
+        - id: enrich_accounts
+          tool: soql_query
+          foreach: "$opportunities.items"
+          params:
+            query: "SELECT Id, Name FROM Account WHERE Id = '$item.AccountId'"
+          output: enriched
+
+    - id: three_way_match
+      name: Three-Way Match
+      depends_on: [entity_resolution]
+      steps:
+        - id: match_rows
+          tool: o2c_match_order_delivery_invoice
+          foreach: "$entity_resolution.enriched.items"
+          params:
+            opportunity_id: "$item.Opportunity_ID"
+          retry:
+            max_attempts: 5
+          verification:
+            - check_id: match_rate
+              expression: "$result.match_rate >= 0.95"
+              on_failure: warn
+
+        - id: write_exceptions
+          tool: s3_write_exceptions
+          type: compute
+          condition: "$match_rows.exceptions | length > 0"
+          params:
+            path: "$variables.s3_prefix/exceptions/"
+            data: "$match_rows.exceptions"
+          requires_approval: true
+          risk_class: write
+
+    - id: cash_projection
+      name: Cash Flow Projection
+      depends_on: [three_way_match]
+      steps:
+        - id: project_cash
+          tool: echo
+          params:
+            message: Forecast 30-day incoming cash

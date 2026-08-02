@@ -21,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from ..events import SimpleSSEManager as SSEManager, emit
+from ..executor.manager import ExecutionManager
+from ..journeys.service import DslJourneyStore
 from ..models import (
     AggregateReport,
     Job,
@@ -46,6 +48,7 @@ from ..models import (
     Step,
     StepResult,
 )
+from ..registry.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +114,21 @@ class InMemoryEngine:
     # raise StepFailure(msg) to fail the step, or return normally to
     # complete it. `ctx` is a shared dict passed between steps of the
     # same job so steps can read each other's outputs.
-    step_tools: dict[str, "StepTool"] = field(default_factory=dict)
+    step_tools: dict[str, StepTool] = field(default_factory=dict)
+    dsl_store: DslJourneyStore = field(default_factory=DslJourneyStore)
+    tool_registry: ToolRegistry = field(default_factory=ToolRegistry)
+    execution_manager: ExecutionManager = field(default_factory=ExecutionManager)
 
-    # ── Journeys ────────────────────────────────────────────────────────
+    def __post_init__(self) -> None:
+        self.execution_manager.dispatcher.registry = self.tool_registry
+
+    def known_tool_ids(self) -> frozenset[str]:
+        embedded = self.execution_manager.dispatcher.embedded.list_tools()
+        return self.tool_registry.catalog_tool_ids() | frozenset(embedded)
+
+    async def run_execution_to_completion(self, execution_id) -> None:
+        """Background helper for POST /executions submit."""
+        await self.execution_manager.run_to_completion(execution_id)
 
     async def list_journeys(
         self,

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tools-o2c"
+version = "1.0.0"
+description = "Order-to-Cash tool package for Nexus AI Engine"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "nexus-tool-sdk",
+    "httpx>=0.28",
+    "pydantic>=2.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/o2c_tools"]

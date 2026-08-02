@@ -33,8 +33,16 @@ See `docs/dev-plan/000-master-plan.md` for sprint mapping.
 
 ## Closed-loop agent prompts
 
-| Release | Prompt file |
-|---------|-------------|
-| v0.2.0-alpha | [closed-loop-v0.2.0-alpha.md](./closed-loop-v0.2.0-alpha.md) |
+| Release | Prompt file | Build plan |
+|---------|-------------|------------|
+| v0.2.0-alpha | [closed-loop-v0.2.0-alpha.md](./closed-loop-v0.2.0-alpha.md) | `build/v0.2.0-alpha-foundation.plan.md` |
+| v0.2.0-beta | [closed-loop-v0.2.0-beta.md](./closed-loop-v0.2.0-beta.md) | `build/v0.2.0-beta-journey-dsl.plan.md` |
+| v0.2.0-rc1 | *(add when needed)* | `build/v0.2.0-rc1-execution-engine.plan.md` |
+| v0.2.0-rc2 | [closed-loop-v0.2.0-rc2.md](./closed-loop-v0.2.0-rc2.md) | `build/v0.2.0-rc2-tool-platform.plan.md` |
+| v0.2.0 | [closed-loop-v0.2.0.md](./closed-loop-v0.2.0.md) | `build/v0.2.0-distributed-runtime.plan.md` |
+| v0.3.0 | [closed-loop-v0.3.0.md](./closed-loop-v0.3.0.md) | `build/v0.3.0-journey-studio.plan.md` |
+| v1.0.0 | [closed-loop-v1.0.0.md](./closed-loop-v1.0.0.md) | `build/v1.0.0-production-ga.plan.md` |
 
-Usage: open Cursor **Agent** mode, attach `@docs/dev-plan/build/v0.2.0-alpha-foundation.plan.md`, paste the prompt from the closed-loop doc.
+**Usage:** open Cursor **Agent** mode, attach `@docs/dev-plan/build/<release>.plan.md`, paste the **Prompt (copy from here)** section from the matching closed-loop doc.
+
+**Prerequisite chain:** alpha → beta → rc1 → rc2 → v0.2.0 → v0.3.0 → v1.0.0 (each release must be tagged before the next closed-loop starts).

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-ai-engine"
-version = "0.1.0a2"
+version = "0.2.0rc2"
 description = "Journey/stage/job AI orchestration engine extracted from nexus-backend. Port-based core with DynamoDB/S3 default adapters, a reference FastAPI/MCP server, and an importable testing harness."
 readme = "README.md"
 requires-python = ">=3.10"

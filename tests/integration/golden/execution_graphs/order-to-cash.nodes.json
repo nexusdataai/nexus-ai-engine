@@ -1,0 +1,18 @@
+{
+  "node_count": 6,
+  "kinds": [
+    "tool_call",
+    "tool_call",
+    "tool_call",
+    "approval",
+    "tool_call",
+    "tool_call"
+  ],
+  "tool_ids": [
+    "query_virtual_entity",
+    "soql_query",
+    "o2c_match_order_delivery_invoice",
+    "s3_write_exceptions",
+    "echo"
+  ]
+}

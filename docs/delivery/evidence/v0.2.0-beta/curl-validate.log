@@ -1,0 +1,7 @@
+=== β-J1: validate invalid DSL ===
+{"valid":false,"errors":[{"path":"metadata.id","code":"string_pattern_mismatch","message":"String should match pattern '^[a-z0-9-]+$'","severity":"error"},{"path":"spec.stages","code":"too_short","message":"List should have at least 1 item after validation, not 0","severity":"error"}],"warnings":[]}
+HTTP 200
+
+=== β-J2: validate O2C YAML ===
+{"valid":true,"errors":[],"warnings":[]}
+HTTP 200

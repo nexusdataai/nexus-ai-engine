@@ -1,7 +1,7 @@
 # Nexus AI Engine — User Guide Index
 
-**Version:** 0.1.0 (planning)  
-**Status:** Draft  
+**Version:** v0.2.0-alpha  
+**Status:** Accepted  
 
 ---
 

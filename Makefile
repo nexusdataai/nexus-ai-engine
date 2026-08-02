@@ -30,12 +30,16 @@ help:
 
 .PHONY: install
 install: ## Install the package with all extras into the active environment
+	$(PIP) install -e packages/nexus-tool-sdk
+	$(PIP) install -e packages/tools-o2c
 	$(PIP) install -e ".[dev,aws,test,server,harness]"
 
 .PHONY: install-venv
 install-venv: ## Create .venv if missing and install with all extras
 	@test -d $(VENV) || $(PYTHON) -m venv $(VENV)
 	$(VENV_BIN)/pip install --upgrade pip
+	$(VENV_BIN)/pip install -e packages/nexus-tool-sdk
+	$(VENV_BIN)/pip install -e packages/tools-o2c
 	$(VENV_BIN)/pip install -e ".[dev,aws,test,server,harness]"
 	@echo "Activate with: source $(VENV_BIN)/activate"
 

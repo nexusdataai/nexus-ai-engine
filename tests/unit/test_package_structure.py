@@ -13,6 +13,8 @@ EXPECTED_SUBMODULES = [
     "contracts",
     "events",
     "execution",
+    "executor",
+    "journeys",
     "models",
     "server",
     "server.routers",

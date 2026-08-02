@@ -17,20 +17,25 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .. import __version__
 from ..execution import InMemoryEngine
+from .routers import executions as executions_router
 from .routers import health as health_router
 from .routers import jobs as jobs_router
+from .routers import journey_dsl_api as journey_dsl_router
 from .routers import journeys as journeys_router
 from .routers import logs as logs_router
 from .routers import prompts as prompts_router
 from .routers import reports as reports_router
 from .routers import schedules as schedules_router
 from .routers import stages_registry as stages_registry_router
+from .routers import tool_packages as tool_packages_router
 from .routers import ui as ui_router
 from .observability import build_metrics_registry
 
 logger = logging.getLogger(__name__)
 
 JOURNEYS_PREFIX = "/api/v1/journeys"
+EXECUTIONS_PREFIX = "/api/v1/executions"
+API_V1_PREFIX = "/api/v1"
 PROMPTS_PREFIX = "/api/v1/prompts"
 SCHEDULES_PREFIX = "/api/v1/schedules"
 
@@ -101,7 +106,10 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
     # automatically when ``factory.build_engine`` returns the ``Engine``
     # facade (i.e. when DynamoDB + S3 names are present in EngineConfig).
     if engine is None or isinstance(engine, InMemoryEngine):
+        app.include_router(journey_dsl_router.router, prefix=JOURNEYS_PREFIX, tags=["journey-dsl"])
         app.include_router(journeys_router.router, prefix=JOURNEYS_PREFIX, tags=["journeys"])
+        app.include_router(executions_router.router, prefix=EXECUTIONS_PREFIX, tags=["executions"])
+        app.include_router(tool_packages_router.router, prefix=API_V1_PREFIX, tags=["tools"])
         app.include_router(jobs_router.router,     prefix=JOURNEYS_PREFIX, tags=["jobs"])
         app.include_router(logs_router.router,     prefix=JOURNEYS_PREFIX, tags=["logs"])
         app.include_router(reports_router.router,  prefix=JOURNEYS_PREFIX, tags=["reports"])

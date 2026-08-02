@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nexus-tool-sdk"
+version = "0.2.0rc2"
+description = "HTTP clients for ontology VDL and Connector APIs — used by AI Engine tool packages"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.10",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nexus_tool_sdk"]

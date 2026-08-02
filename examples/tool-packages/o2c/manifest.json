@@ -1,0 +1,29 @@
+{
+  "apiVersion": "nexus.ai/v1",
+  "kind": "ToolPackage",
+  "metadata": {
+    "id": "order-to-cash-tools",
+    "version": "1.0.0",
+    "domain": "o2c",
+    "publisher": "finance-ontology"
+  },
+  "spec": {
+    "ontology_api": {
+      "vdl_base_url": "http://ontology/api/v1/vdl",
+      "connector_base_url": "http://ontology/api/v1/connectors"
+    },
+    "tools": [
+      {
+        "tool_id": "o2c_match_order_delivery_invoice",
+        "version": "1.0.0",
+        "module": "o2c_tools.match:O2cMatchOrderDeliveryInvoiceTool",
+        "risk_class": "read",
+        "requires_approval": false
+      }
+    ],
+    "provenance": {
+      "test_suite": "tools-o2c-v1.0.0",
+      "git_sha": "rc2"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "apiVersion": "nexus.ai/v1",
+  "kind": "ToolPackage",
+  "metadata": {
+    "id": "test-mock-tools",
+    "version": "1.0.0",
+    "domain": "test",
+    "publisher": "nexus-ai-engine"
+  },
+  "spec": {
+    "ontology_api": {
+      "vdl_base_url": "http://ontology/api/v1/vdl",
+      "connector_base_url": "http://ontology/api/v1/connectors"
+    },
+    "tools": [
+      {
+        "tool_id": "mock",
+        "version": "0.1.0",
+        "module": "nexus_ai_engine.tools.base.mock:MockTool",
+        "risk_class": "read",
+        "requires_approval": false
+      }
+    ]
+  }
+}

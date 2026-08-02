@@ -7,7 +7,7 @@ import nexus_ai_engine
 
 def test_version_exposed() -> None:
     assert isinstance(nexus_ai_engine.__version__, str)
-    assert nexus_ai_engine.__version__.startswith("0.1.")
+    assert nexus_ai_engine.__version__.startswith("0.2.")
 
 
 def test_submodules_importable() -> None:

@@ -4,6 +4,28 @@ All notable changes to Nexus AI Engine are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] — 2026-08-03
+
+### Added
+
+- **DynamoDB executions table** — CloudFormation, provision script, `/readiness` checks
+- **DynamoDBExecutionRepository** — CRUD, optimistic concurrency, distributed locks, GSI queries
+- **ExecutionRuntimeService** — persisted submit/tick/cancel/pause/resume with admission control
+- **S3ArtifactStore** — JSON/JSONL logs and report summaries to configured buckets
+- **Executions API in production mode** — `/api/v1/executions` mounted for DynamoDB-backed engine
+- **SSE** — `GET /api/v1/executions/{id}/stream` live execution events
+- **Temporal worker scaffold** — `RunExecutionWorkflow`, `executor_tick`, optional `[temporal]` extra
+- **Worker Helm** — `worker-deployment.yaml` + HPA (min 3 replicas)
+- **MCP execution_tool** — submit, get, list, cancel
+- **Migration CLI** — `scripts/migrate-v01-jobs-to-executions.py`
+- **User guide** Ch.6 — Monitoring executions
+
+### Changed
+
+- Production `Engine` facade exposes `execution_runtime`, `dsl_store`, `artifacts`
+- Journey DSL API uses shared `dsl_store` in both in-memory and production modes
+- Version bumped from `0.2.0rc2` to `0.2.0`
+
 ## [0.2.0-rc2] — 2026-08-02
 
 ### Added

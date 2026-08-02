@@ -39,6 +39,7 @@ class EngineConfig:
     role_arn: Optional[str] = None
 
     dynamodb_transformation_table: Optional[str] = None
+    dynamodb_executions_table: Optional[str] = None
     dynamodb_prompts_table: Optional[str] = None
 
     s3_journey_logs_bucket: Optional[str] = None
@@ -93,6 +94,7 @@ def get_config() -> EngineConfig:
             role_arn=os.getenv("AWS_ROLE_ARN"),
             dynamodb_transformation_table=os.getenv("DYNAMODB_TRANSFORMATION_TABLE")
             or os.getenv("DYNAMODB_TABLE"),
+            dynamodb_executions_table=os.getenv("DYNAMODB_EXECUTIONS_TABLE"),
             dynamodb_prompts_table=os.getenv("DYNAMODB_PROMPTS_TABLE"),
             s3_journey_logs_bucket=os.getenv("S3_JOURNEY_LOGS_BUCKET"),
             s3_journey_reports_bucket=os.getenv("S3_JOURNEY_REPORTS_BUCKET"),

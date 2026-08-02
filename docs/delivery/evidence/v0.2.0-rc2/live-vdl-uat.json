@@ -1,0 +1,102 @@
+{
+  "timestamp": "2026-08-02T18:39:28.609774+00:00",
+  "base_url": "http://127.0.0.1:8081",
+  "rc2-O1": {
+    "status": 200,
+    "body": {
+      "rows": [
+        {
+          "Opportunity_ID": "OPP-UAT-001",
+          "Account_ID": "ACC-UAT-1",
+          "Stage": "Closed Won",
+          "Amount": 5000.0,
+          "Close_Date": "2026-07-01"
+        }
+      ],
+      "metadata": {
+        "source_table": "Opportunity",
+        "source_schema": "sfdc_itxp2dev",
+        "source_system": "sfdc_itxp2dev",
+        "source_type": "simulator",
+        "mode": "simulator",
+        "rule_id": "edbd65ff-53d4-45db-87b8-06eeafb20e5d",
+        "row_count": 1
+      },
+      "virtualEntity": "Opportunity"
+    }
+  },
+  "rc2-T5": {
+    "status": 200,
+    "body": {
+      "results": [
+        {
+          "rows": [
+            {
+              "Opportunity_ID": "OPP-UAT-001",
+              "Account_ID": "ACC-UAT-1",
+              "Stage": "Closed Won",
+              "Amount": 5000.0,
+              "Close_Date": "2026-07-01"
+            }
+          ],
+          "metadata": {
+            "source_table": "Opportunity",
+            "source_schema": "sfdc_itxp2dev",
+            "source_system": "sfdc_itxp2dev",
+            "source_type": "simulator",
+            "mode": "simulator",
+            "rule_id": "edbd65ff-53d4-45db-87b8-06eeafb20e5d",
+            "row_count": 1
+          },
+          "virtualEntity": "Opportunity",
+          "queryId": "q1",
+          "error": null
+        },
+        {
+          "rows": [
+            {
+              "Delivery_ID": "DEL-UAT-001",
+              "Sales_Order_ID": "OPP-UAT-001",
+              "Qty": 100,
+              "Quantity": 100
+            }
+          ],
+          "metadata": {
+            "source_table": "Delivery_Document",
+            "source_schema": "sap_s4hana",
+            "source_system": "sap_s4hana",
+            "source_type": "simulator",
+            "mode": "simulator",
+            "rule_id": "da8b2982-cf0f-4da6-8a4c-2ff112eeb09b",
+            "row_count": 1
+          },
+          "virtualEntity": "Delivery",
+          "queryId": "q2",
+          "error": null
+        }
+      ],
+      "durationMs": 0
+    }
+  },
+  "rc2-T2": {
+    "status": "ok",
+    "match_status": "matched",
+    "result": {
+      "match_status": "matched",
+      "opportunity_id": "OPP-UAT-001",
+      "order_qty": 100,
+      "order_amount": 5000.0,
+      "delivered_qty": 100,
+      "delivery_id": "DEL-UAT-001",
+      "invoiced_amount": 5000.0,
+      "invoice_id": "INV-UAT-001",
+      "discrepancies": [],
+      "line_items": 1
+    },
+    "error": null
+  },
+  "rc2-T4": {
+    "status": "skipped",
+    "note": "connector runtime not bootstrapped in minimal UAT app"
+  }
+}

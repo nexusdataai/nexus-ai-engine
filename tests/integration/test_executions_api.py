@@ -62,10 +62,12 @@ async def test_o2c_execution_completes_via_api(app):
 
 @pytest.mark.asyncio
 async def test_cancel_execution(app, monkeypatch):
-    async def noop(_self, _eid):
+    async def noop(_self, _eid, **_kw):
         return None
 
-    monkeypatch.setattr(InMemoryEngine, "run_execution_to_completion", noop)
+    from nexus_ai_engine.execution.runtime_service import ExecutionRuntimeService
+
+    monkeypatch.setattr(ExecutionRuntimeService, "run_to_completion", noop)
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         submit = await client.post(

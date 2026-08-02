@@ -118,9 +118,21 @@ class InMemoryEngine:
     dsl_store: DslJourneyStore = field(default_factory=DslJourneyStore)
     tool_registry: ToolRegistry = field(default_factory=ToolRegistry)
     execution_manager: ExecutionManager = field(default_factory=ExecutionManager)
+    _execution_runtime: object | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.execution_manager.dispatcher.registry = self.tool_registry
+
+    @property
+    def execution_runtime(self):
+        from ..execution.runtime_service import ExecutionRuntimeService
+
+        if self._execution_runtime is None:
+            self._execution_runtime = ExecutionRuntimeService(
+                manager=self.execution_manager,
+                sse=self.sse,
+            )
+        return self._execution_runtime
 
     def known_tool_ids(self) -> frozenset[str]:
         embedded = self.execution_manager.dispatcher.embedded.list_tools()

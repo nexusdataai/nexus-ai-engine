@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .tools import register_journey_tools, register_logs_and_reports_tools
+from .tools import register_journey_tools, register_logs_and_reports_tools, register_execution_tools
 
 
 def create_mcp_server(engine: Optional[Any] = None, *, name: str = "nexus-ai-engine"):
@@ -33,6 +33,9 @@ def create_mcp_server(engine: Optional[Any] = None, *, name: str = "nexus-ai-eng
     mcp = FastMCP(name)
     register_journey_tools(mcp)
     register_logs_and_reports_tools(mcp)
+    runtime = getattr(engine, "execution_runtime", None) if engine is not None else None
+    dsl_store = getattr(engine, "dsl_store", None) if engine is not None else None
+    register_execution_tools(mcp, runtime=runtime, dsl_store=dsl_store)
     return mcp
 
 
@@ -40,4 +43,5 @@ __all__ = [
     "create_mcp_server",
     "register_journey_tools",
     "register_logs_and_reports_tools",
+    "register_execution_tools",
 ]

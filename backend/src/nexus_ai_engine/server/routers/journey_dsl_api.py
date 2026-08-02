@@ -13,7 +13,7 @@ from ...contracts.journey_dsl import JourneyDefinition
 from ...execution import InMemoryEngine
 from ...journeys import DslJourneyStore, JourneyCompiler, JourneyValidator, ValidationResult
 from ...journeys.service import JourneyVersionConflictError
-from ._deps import get_engine
+from ._deps import get_dsl_store, get_engine
 
 router = APIRouter()
 
@@ -30,10 +30,6 @@ class ImportRequest(BaseModel):
 
 class CloneRequest(BaseModel):
     new_id: str = Field(min_length=1, pattern=r"^[a-z0-9-]+$")
-
-
-def _dsl_store(engine: InMemoryEngine) -> DslJourneyStore:
-    return engine.dsl_store
 
 
 async def _parse_body(request: Request) -> dict[str, Any]:
@@ -64,8 +60,10 @@ async def _parse_body(request: Request) -> dict[str, Any]:
     return data
 
 
-def _validator_for_engine(engine: InMemoryEngine) -> JourneyValidator:
-    return JourneyValidator(known_tools=engine.known_tool_ids())
+def _validator_for_engine(engine) -> JourneyValidator:
+    if isinstance(engine, InMemoryEngine):
+        return JourneyValidator(known_tools=engine.known_tool_ids())
+    return JourneyValidator(known_tools=frozenset())
 
 
 @router.post("/validate", response_model=ValidationResult)
@@ -81,7 +79,8 @@ async def validate_journey_dsl(
 @router.post("/import", response_model=JourneyDefinition, status_code=status.HTTP_201_CREATED)
 async def import_journey(
     request: Request,
-    engine: InMemoryEngine = Depends(get_engine),
+    engine=Depends(get_engine),
+    store: DslJourneyStore = Depends(get_dsl_store),
 ) -> JourneyDefinition:
     data = await _parse_body(request)
     result = _validator_for_engine(engine).validate(data)
@@ -89,14 +88,13 @@ async def import_journey(
         raise HTTPException(status_code=422, detail=result.model_dump())
     definition = JourneyDefinition.model_validate(data)
     try:
-        return _dsl_store(engine).create(definition)
+        return store.create(definition)
     except JourneyVersionConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/dsl", response_model=list[dict[str, Any]])
-async def list_dsl_journeys(engine: InMemoryEngine = Depends(get_engine)) -> list[dict[str, Any]]:
-    store = _dsl_store(engine)
+async def list_dsl_journeys(store: DslJourneyStore = Depends(get_dsl_store)) -> list[dict[str, Any]]:
     items = []
     for definition in store.list_all():
         items.append(
@@ -111,8 +109,8 @@ async def list_dsl_journeys(engine: InMemoryEngine = Depends(get_engine)) -> lis
 
 
 @router.get("/{journey_id}/versions", response_model=list[int])
-async def list_versions(journey_id: str, engine: InMemoryEngine = Depends(get_engine)) -> list[int]:
-    versions = _dsl_store(engine).list_versions(journey_id)
+async def list_versions(journey_id: str, store: DslJourneyStore = Depends(get_dsl_store)) -> list[int]:
+    versions = store.list_versions(journey_id)
     if not versions:
         raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
     return versions
@@ -120,9 +118,9 @@ async def list_versions(journey_id: str, engine: InMemoryEngine = Depends(get_en
 
 @router.get("/{journey_id}/versions/{version}", response_model=JourneyDefinition)
 async def get_version(
-    journey_id: str, version: int, engine: InMemoryEngine = Depends(get_engine)
+    journey_id: str, version: int, store: DslJourneyStore = Depends(get_dsl_store)
 ) -> JourneyDefinition:
-    definition = _dsl_store(engine).get(journey_id, version)
+    definition = store.get(journey_id, version)
     if not definition:
         raise HTTPException(status_code=404, detail=f"Journey {journey_id} v{version} not found")
     return definition
@@ -132,10 +130,10 @@ async def get_version(
 async def export_journey(
     journey_id: str,
     version: int | None = None,
-    engine: InMemoryEngine = Depends(get_engine),
+    store: DslJourneyStore = Depends(get_dsl_store),
 ) -> dict[str, str]:
     try:
-        content = _dsl_store(engine).export_yaml(journey_id, version)
+        content = store.export_yaml(journey_id, version)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found") from exc
     return {"journey_id": journey_id, "yaml": content}
@@ -145,14 +143,15 @@ async def export_journey(
 async def validate_stored_journey(
     journey_id: str,
     request: Request,
-    engine: InMemoryEngine = Depends(get_engine),
+    engine=Depends(get_engine),
+    store: DslJourneyStore = Depends(get_dsl_store),
     strict_tools: bool = False,
 ) -> ValidationResult:
     body = await request.body()
     if body:
         data = await _parse_body(request)
     else:
-        data = _dsl_store(engine).get(journey_id)
+        data = store.get(journey_id)
         if data is None:
             raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
         data = data.model_dump(by_alias=True)
@@ -163,10 +162,10 @@ async def validate_stored_journey(
 async def clone_dsl_journey(
     journey_id: str,
     body: CloneRequest,
-    engine: InMemoryEngine = Depends(get_engine),
+    store: DslJourneyStore = Depends(get_dsl_store),
 ) -> JourneyDefinition:
     try:
-        return _dsl_store(engine).clone(journey_id, new_id=body.new_id)
+        return store.clone(journey_id, new_id=body.new_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found") from exc
 
@@ -176,9 +175,10 @@ async def compile_journey(
     journey_id: str,
     version: int | None = None,
     strict_tool_validation: bool = False,
-    engine: InMemoryEngine = Depends(get_engine),
+    engine=Depends(get_engine),
+    store: DslJourneyStore = Depends(get_dsl_store),
 ) -> dict[str, Any]:
-    definition = _dsl_store(engine).get(journey_id, version)
+    definition = store.get(journey_id, version)
     if not definition:
         raise HTTPException(status_code=404, detail=f"Journey {journey_id} not found")
     if strict_tool_validation:
@@ -195,7 +195,8 @@ async def compile_journey(
 @router.post("/dsl", response_model=JourneyDefinition, status_code=status.HTTP_201_CREATED)
 async def create_dsl_journey(
     request: Request,
-    engine: InMemoryEngine = Depends(get_engine),
+    engine=Depends(get_engine),
+    store: DslJourneyStore = Depends(get_dsl_store),
 ) -> JourneyDefinition:
     data = await _parse_body(request)
     result = _validator_for_engine(engine).validate(data)
@@ -203,6 +204,6 @@ async def create_dsl_journey(
         raise HTTPException(status_code=422, detail=result.model_dump())
     definition = JourneyDefinition.model_validate(data)
     try:
-        return _dsl_store(engine).create(definition)
+        return store.create(definition)
     except JourneyVersionConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

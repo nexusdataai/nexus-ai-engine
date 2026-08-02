@@ -50,6 +50,9 @@ class Engine:
     schedules: "SchedulerService"
     logs_and_reports: "LogsAndReportsService"
     job_executor: "TransformationJobExecutor"
+    execution_runtime: "ExecutionRuntimeService"
+    dsl_store: "DslJourneyStore"
+    artifacts: "S3ArtifactStore"
 
     @property
     def stage_registry(self) -> dict:
@@ -90,7 +93,7 @@ def build_engine(
     # - the config has no DynamoDB topology configured (callers that pass an
     #   empty ``EngineConfig()`` are doing local/test setup; the real
     #   DynamoDB-backed services need a transformation table at minimum).
-    if in_memory or config is None or config.dynamodb_transformation_table is None:
+    if in_memory or config is None or config.dynamodb_transformation_table is None or config.dynamodb_executions_table is None:
         engine = InMemoryEngine()
         if seed_demo:
             seed(engine)
@@ -101,12 +104,23 @@ def build_engine(
     set_config(config)
 
     # Imports are deferred to keep the in-memory path free of boto3 weight.
+    from .adapters.dynamodb.execution_repo import DynamoDBExecutionRepository
+    from .adapters.s3.artifact_store import S3ArtifactStore
+    from .execution.runtime_service import ExecutionRuntimeService
+    from .executor.admission import AdmissionController
+    from .journeys.service import DslJourneyStore
     from .execution.transformation_job_executor import TransformationJobExecutor
     from .services import (
         JourneyService,
         LogsAndReportsService,
         PromptsService,
         SchedulerService,
+    )
+
+    repo = DynamoDBExecutionRepository()
+    runtime = ExecutionRuntimeService(
+        repository=repo,
+        admission=AdmissionController(repository=repo),
     )
 
     return Engine(
@@ -118,4 +132,7 @@ def build_engine(
         job_executor=TransformationJobExecutor(
             region_name=config.region, role_arn=config.role_arn
         ),
+        execution_runtime=runtime,
+        dsl_store=DslJourneyStore(),
+        artifacts=S3ArtifactStore(),
     )

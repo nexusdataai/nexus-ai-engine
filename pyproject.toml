@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-ai-engine"
-version = "0.2.0rc2"
+version = "0.2.0"
 description = "Journey/stage/job AI orchestration engine extracted from nexus-backend. Port-based core with DynamoDB/S3 default adapters, a reference FastAPI/MCP server, and an importable testing harness."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -57,6 +57,9 @@ harness = [
     "pytest-json-report>=1.5",
     "pytest-html>=4.1",
 ]
+temporal = [
+    "temporalio>=1.8",
+]
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
@@ -90,6 +93,7 @@ dev = [
 
 [project.scripts]
 nexus-ai-engine = "nexus_ai_engine.server.cli:main"
+nexus-ai-engine-worker = "nexus_ai_engine.workers.temporal.worker_main:main"
 
 [project.entry-points.pytest11]
 nexus_ai_engine = "nexus_ai_engine.testing.fixtures"

@@ -130,6 +130,9 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
         # (everything under /api/v1/journeys/*) — see endpoint listing in
         # legacy/journey_api.py for the full surface.
         app.include_router(legacy_journey.router, prefix=JOURNEYS_PREFIX, tags=["journeys"])
+        app.include_router(journey_dsl_router.router, prefix=JOURNEYS_PREFIX, tags=["journey-dsl"])
+        app.include_router(executions_router.router, prefix=EXECUTIONS_PREFIX, tags=["executions"])
+        app.include_router(tool_packages_router.router, prefix=API_V1_PREFIX, tags=["tools"])
         # ``legacy/prompts_api`` already declares prefix="/api/v1/prompts"
         # in its own APIRouter constructor, so mount at root.
         app.include_router(legacy_prompts.router, tags=["prompts"])
@@ -146,6 +149,8 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
         app.state.scheduler_service     = engine.schedules
         app.state.logs_reports_service  = engine.logs_and_reports
         app.state.job_executor          = engine.job_executor
+        app.state.execution_runtime     = engine.execution_runtime
+        app.state.dsl_store             = engine.dsl_store
         logger.info("Mounted legacy routers (production Engine mode)")
 
     # Static assets for the embedded UI — shared across both modes.

@@ -64,12 +64,14 @@ def _create_dynamodb_table(table_name: str) -> None:
 @moto.mock_aws
 def test_production_engine_mounts_legacy_routers(reset_global_config) -> None:
     _create_dynamodb_table("test-journeys")
+    _create_dynamodb_table("test-executions")
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-logs")
     boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="test-reports")
 
     cfg = EngineConfig(
         region="us-east-1",
         dynamodb_transformation_table="test-journeys",
+        dynamodb_executions_table="test-executions",
         dynamodb_prompts_table="test-journeys",
         s3_journey_logs_bucket="test-logs",
         s3_journey_reports_bucket="test-reports",

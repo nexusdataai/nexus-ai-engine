@@ -15,5 +15,10 @@ exactly that.
 
 from .journey_tool import register_journey_tools
 from .logs_and_reports_tool import register_logs_and_reports_tools
+from .execution_tool import register_execution_tools
 
-__all__ = ["register_journey_tools", "register_logs_and_reports_tools"]
+__all__ = [
+    "register_journey_tools",
+    "register_logs_and_reports_tools",
+    "register_execution_tools",
+]

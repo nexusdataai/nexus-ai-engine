@@ -37,6 +37,7 @@ def _build_engine_config():
         region=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"),
         role_arn=os.environ.get("AWS_ROLE_ARN"),
         dynamodb_transformation_table=os.environ.get("DYNAMODB_TRANSFORMATION_TABLE"),
+        dynamodb_executions_table=os.environ.get("DYNAMODB_EXECUTIONS_TABLE"),
         dynamodb_prompts_table=os.environ.get("DYNAMODB_PROMPTS_TABLE"),
         s3_journey_logs_bucket=os.environ.get("S3_JOURNEY_LOGS_BUCKET"),
         s3_journey_reports_bucket=os.environ.get("S3_JOURNEY_REPORTS_BUCKET"),
@@ -50,6 +51,7 @@ def _build_engine_config():
 _SSM_TO_ENV_FALLBACK = {
     "role_arn":                       "AWS_ROLE_ARN",
     "dynamodb_transformation_table":  "DYNAMODB_TRANSFORMATION_TABLE",
+    "dynamodb_executions_table":      "DYNAMODB_EXECUTIONS_TABLE",
     "dynamodb_prompts_table":         "DYNAMODB_PROMPTS_TABLE",
     "s3_journey_logs_bucket":         "S3_JOURNEY_LOGS_BUCKET",
     "s3_journey_reports_bucket":      "S3_JOURNEY_REPORTS_BUCKET",
@@ -109,6 +111,7 @@ def _build_engine_config_from_ssm(prefix: str):
         region=region,
         role_arn=_ssm_or_env("role_arn"),
         dynamodb_transformation_table=_ssm_or_env("dynamodb_transformation_table"),
+        dynamodb_executions_table=_ssm_or_env("dynamodb_executions_table"),
         dynamodb_prompts_table=_ssm_or_env("dynamodb_prompts_table"),
         s3_journey_logs_bucket=_ssm_or_env("s3_journey_logs_bucket"),
         s3_journey_reports_bucket=_ssm_or_env("s3_journey_reports_bucket"),

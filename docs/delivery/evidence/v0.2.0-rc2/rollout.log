@@ -1,0 +1,21 @@
+=== v0.2.0-rc2 Starhub cluster rollout (context 3) ===
+Date: 2026-08-02T18:40:00Z
+Account: 298722972165
+Cluster: prod-cluster
+Namespace: ai-engine-prod
+Context: ./set-context.sh 3
+
+Pipeline:
+1. bump-version.sh — skipped (image tag 0.2.0-rc2-98379f5 from commit 98379f5)
+2. package-images.sh --only-ai-engine-api — OK
+3. create-ecr-images.sh --only-ai-engine-api — OK
+4. app-rollout.sh --capability ai-engine --env prod --namespace ai-engine-prod --version 0.2.0-rc2-98379f5 ai-engine-api — OK
+
+Verification:
+- Pod image: 298722972165.dkr.ecr.us-east-1.amazonaws.com/nexus-ai-engine-api:0.2.0-rc2-98379f5
+- Pod phase: Running
+- GET /health (port-forward 8020:8000): {"status":"ok","version":"0.2.0rc2"}
+- Upgraded from: 0.2.0-rc1-9e78bee
+
+Note: Starhub ai-engine-prod namespace has no co-located nexus-backend/ontology pod.
+O2C live VDL UAT executed via ontology HTTP harness (live_vdl_uat.py) — see live-vdl-uat.json.

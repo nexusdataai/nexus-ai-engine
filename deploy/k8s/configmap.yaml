@@ -26,9 +26,10 @@ data:
   #
   # Expected parameters under this prefix:
   #   dynamodb_transformation_table   ai-engine-journeys-${ENV}
-  #   dynamodb_prompts_table          ai-engine-journeys-${ENV}
-  #   s3_journey_logs_bucket          ai-engine-journeys-logs-${ENV}
-  #   s3_journey_reports_bucket       ai-engine-journeys-reports-${ENV}
+  #   dynamodb_executions_table       ai-engine-executions-${ENV}
+  #   dynamodb_prompts_table          ai-engine-prompts-${ENV}
+  #   s3_journey_logs_bucket          ai-engine-journey-logs-${ENV}
+  #   s3_journey_reports_bucket       ai-engine-journey-reports-${ENV}
   #
   # Per-key DYNAMODB_* / S3_* environment variables still act as overrides
   # for any field absent from SSM (see _SSM_TO_ENV_FALLBACK in

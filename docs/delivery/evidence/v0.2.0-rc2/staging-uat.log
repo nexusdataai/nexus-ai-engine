@@ -1,0 +1,10 @@
+=== rc2 cluster UAT 2026-08-02T18:21:13Z ===
+image: 0.2.0-rc2-98379f5
+rc2-T1 health: {"status":"ok","version":"0.2.0rc2"}
+rc2-T1 publish: {"package_id":"order-to-cash-tools","version":"1.0.0","domain":"o2c","tools_registered":1}
+rc2-T1 tools list: {"tool_id":"o2c_match_order_delivery_invoice","version":"1.0.0","schema_url":"nexus.sre/contracts/tool-descriptor/v1","display_name":"O2C Three-Way Match","description":"Compare Opportunity qty/amount with SAP Delivery qty and Oracle AR Invoice amount. Tolerance: qty ±2%, amount ±5%.","category":"o2c","author":{"team":"finance-ontology","contact":"o2c@nexus.ai"},"provider":"tools-o2c","provider_min_version":null,"permission_scope":"tenant","capabilities":[{"name":"match_order_delivery_invoice","display_name":"Match Order / Delivery / Invoice","description":"Three-way match for a single opportunity","risk_class":"read","reversible":true,"idempotent":true,"supports_dry_run":true,"arguments":[{"name":"opportunity_id","type":"string","required":true,"description":"Salesforce Opportunity ID (e.g. OPP-00123)","json_schema":{"type":"string"},"example":null}],"output_schema":{"type":"object","properties":{"match_status":{"type":"string"},"opportunity_id":{"type":"string"},"discrepancies":{"type":"array","items":{"type":"string"}}}},"required_permissions":[],"permission_scope":"tenant","typical_latency_ms":500,"p99_latency_ms":5000,"rate_limit_per_minute":null}],"slo":{"availability_target":0.995,"p95_latency_ms":2000,"error_budget_burn_alert_ratio":2.0},"tags":["o2c","match","finance"],"replay_supported":true}
+
+rc2-T3 strict reject unknown:
+{"valid":false,"errors":[{"path":"spec.stages.main.steps.s1.tool","code":"unknown_tool","message":"tool 'not_in_catalog_xyz' not in registry catalog","severity":"error"}],"warnings":[]}
+rc2-T3 strict accept o2c:
+{"valid":true,"errors":[],"warnings":[]}

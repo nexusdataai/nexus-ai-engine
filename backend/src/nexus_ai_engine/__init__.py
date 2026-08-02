@@ -21,7 +21,7 @@ Public surface (stable for 0.1.0a2):
 - :mod:`nexus_ai_engine.events` — SSEManager + emit helpers.
 """
 
-__version__ = "0.2.0rc2"
+__version__ = "0.2.0"
 
 from .config import EngineConfig, get_config, set_config
 from .factory import Engine, build_engine

@@ -38,9 +38,36 @@ def _check_dynamodb(engine: Any | None) -> dict[str, Any]:
     if engine is None or isinstance(engine, InMemoryEngine):
         return {"status": "skipped", "reason": "in_memory_engine"}
     config = get_config()
-    if not config.dynamodb_transformation_table:
-        return {"status": "unavailable", "reason": "not_configured"}
-    return {"status": "ok", "table": config.dynamodb_transformation_table}
+    journeys_table = config.dynamodb_transformation_table
+    executions_table = config.dynamodb_executions_table
+    if not journeys_table or not executions_table:
+        missing = []
+        if not journeys_table:
+            missing.append("journeys")
+        if not executions_table:
+            missing.append("executions")
+        return {"status": "unavailable", "reason": "not_configured", "missing": missing}
+    try:
+        import boto3
+
+        client = boto3.client("dynamodb", region_name=config.aws_region)
+        for label, table in (("journeys", journeys_table), ("executions", executions_table)):
+            desc = client.describe_table(TableName=table)
+            status = desc["Table"]["TableStatus"]
+            if status != "ACTIVE":
+                return {
+                    "status": "degraded",
+                    "reason": f"{label}_not_active",
+                    "table": table,
+                    "table_status": status,
+                }
+        return {
+            "status": "ok",
+            "journeys_table": journeys_table,
+            "executions_table": executions_table,
+        }
+    except Exception as exc:
+        return {"status": "unavailable", "reason": str(exc)}
 
 
 def readiness_payload(engine: Any | None) -> tuple[dict[str, Any], bool]:

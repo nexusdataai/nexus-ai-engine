@@ -10,9 +10,10 @@
 #
 # Naming convention:
 #   /ai-engine/{env}/dynamodb_transformation_table  →  ai-engine-journeys-{env}
-#   /ai-engine/{env}/dynamodb_prompts_table         →  ai-engine-journeys-{env}
-#   /ai-engine/{env}/s3_journey_logs_bucket         →  ai-engine-journeys-logs-{env}
-#   /ai-engine/{env}/s3_journey_reports_bucket      →  ai-engine-journeys-reports-{env}
+#   /ai-engine/{env}/dynamodb_executions_table      →  ai-engine-executions-{env}
+#   /ai-engine/{env}/dynamodb_prompts_table         →  ai-engine-prompts-{env}
+#   /ai-engine/{env}/s3_journey_logs_bucket         →  ai-engine-journey-logs-{env}
+#   /ai-engine/{env}/s3_journey_reports_bucket      →  ai-engine-journey-reports-{env}
 #
 # After seeding, the pod can be deployed with `kubectl apply -k deploy/k8s/`
 # and will resolve its EngineConfig automatically. Override per-key by
@@ -73,9 +74,10 @@ echo "  authenticated as: ${caller}"
 
 declare -A PARAMS=(
     [dynamodb_transformation_table]="ai-engine-journeys-${ENV}"
-    [dynamodb_prompts_table]="ai-engine-journeys-${ENV}"
-    [s3_journey_logs_bucket]="ai-engine-journeys-logs-${ENV}"
-    [s3_journey_reports_bucket]="ai-engine-journeys-reports-${ENV}"
+    [dynamodb_executions_table]="ai-engine-executions-${ENV}"
+    [dynamodb_prompts_table]="ai-engine-prompts-${ENV}"
+    [s3_journey_logs_bucket]="ai-engine-journey-logs-${ENV}"
+    [s3_journey_reports_bucket]="ai-engine-journey-reports-${ENV}"
     [environment]="${ENV}"
     [max_concurrent_jobs]="10"
     [capability_name]="call-processing"

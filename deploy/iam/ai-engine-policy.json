@@ -23,6 +23,8 @@
             "Resource": [
                 "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-journeys-*",
                 "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-journeys-*/index/*",
+                "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-executions-*",
+                "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-executions-*/index/*",
                 "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-prompts-*",
                 "arn:aws:dynamodb:${REGION}:${ACCOUNT_ID}:table/ai-engine-prompts-*/index/*"
             ]

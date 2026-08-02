@@ -1,0 +1,40 @@
+name: order-to-cash-monitor
+description: |
+  Reference O2C monitoring journey for the embedded dev UI and UAT α-U*.
+  Mirrors the seeded in-memory journey: entity resolution through cash projection.
+
+stage:
+  id: order_to_cash
+  name: Order-to-Cash Monitor
+  description: Match orders across systems, score anomalies, and project cash flow.
+  steps:
+    - id: entity-resolution
+      name: Entity Resolution
+      type: tool
+      tool: echo
+      input:
+        message: "Resolve Salesforce, SAP, and Oracle order entities"
+    - id: three-way-match
+      name: Three-Way Match
+      type: tool
+      tool: echo
+      input:
+        message: "Validate PO = delivery = invoice quantities"
+    - id: anomaly-scoring
+      name: Anomaly Scoring
+      type: tool
+      tool: echo
+      input:
+        message: "Score orders against historical baselines"
+    - id: workflow-actions
+      name: Workflow Actions
+      type: tool
+      tool: echo
+      input:
+        message: "Route exceptions to collectors and ERP workflows"
+    - id: cash-flow-projection
+      name: Cash Flow Projection
+      type: tool
+      tool: echo
+      input:
+        message: "Forecast 30-day incoming cash"

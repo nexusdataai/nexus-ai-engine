@@ -1,0 +1,34 @@
+name: supply-chain-risk
+description: |
+  Reference supply-chain risk journey for the embedded dev UI.
+  Models supplier graph analysis, concentration scoring, and disruption tabletop.
+
+stage:
+  id: supply_chain_risk
+  name: Supply Chain Risk
+  description: Identify upstream dependency risk and produce mitigations.
+  steps:
+    - id: supplier-graph
+      name: Supplier Graph
+      type: tool
+      tool: echo
+      input:
+        message: "Build upstream dependency graph from BOM and PO history"
+    - id: concentration-risk
+      name: Concentration Risk
+      type: tool
+      tool: echo
+      input:
+        message: "Score geo and tier concentration for single-source SKUs"
+    - id: disruption-simulation
+      name: Disruption Simulation
+      type: tool
+      tool: echo
+      input:
+        message: "Simulate port, fab, and logistics disruption scenarios"
+    - id: mitigation-plan
+      name: Mitigation Plan
+      type: tool
+      tool: echo
+      input:
+        message: "Recommend alternate suppliers and safety stock actions"

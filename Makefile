@@ -75,6 +75,10 @@ test-property: ## Run hypothesis property tests
 test-e2e: ## Run end-to-end tests against the in-process reference server
 	$(PYTEST) tests/e2e -q
 
+.PHONY: test-e2e-smoke
+test-e2e-smoke: ## Minimal alpha smoke: health, journeys API, embedded UI assets
+	$(PYTEST) tests/e2e/test_health.py tests/e2e/test_ui_static.py -q
+
 .PHONY: test-journeys
 test-journeys: ## Exercise plugin-journey YAML samples end-to-end
 	$(PYTEST) tests/journeys -q
@@ -115,6 +119,14 @@ parallel: ## Run the suite in parallel
 # -----------------------------------------------------------------------------
 # Lint / typecheck / boundary
 # -----------------------------------------------------------------------------
+
+.PHONY: lint-docs
+lint-docs: ## Validate YAML front-matter on planning/delivery docs
+	$(PYTHON) scripts/lint_doc_frontmatter.py
+
+.PHONY: lint-ci
+lint-ci: ## Ruff lint for CI gate (contracts + contract tests)
+	ruff check $(BACKEND_SRC)/nexus_ai_engine/contracts tests/contracts
 
 .PHONY: lint
 lint: ## Ruff lint
@@ -199,9 +211,10 @@ clean: ## Remove caches and build artifacts
 	rm -rf dist build *.egg-info .pytest_cache .ruff_cache .mypy_cache .coverage htmlcov coverage.xml reports
 
 .PHONY: ci
-ci: ## What CI runs: guardrail + lint + typecheck + coverage + build
+ci: ## What CI runs: guardrail + lint + lint-docs + typecheck + coverage + build
 	$(MAKE) guardrail
 	$(MAKE) lint
+	$(MAKE) lint-docs
 	$(MAKE) typecheck
 	$(MAKE) coverage
 	$(MAKE) build

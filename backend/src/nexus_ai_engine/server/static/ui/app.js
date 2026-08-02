@@ -451,14 +451,14 @@ function JourneysListPage() {
   const capabilities = useMemo(() => {
     const s = new Set();
     (journeys || []).forEach(j => j.capability && s.add(j.capability));
-    return Array.from(s);
+    return Array.from(s).sort();
   }, [journeys]);
 
   const filtered = useMemo(() => {
     if (!journeys) return [];
     const q = query.toLowerCase();
     return journeys.filter(j => {
-      if (q && !(`${j.name} ${j.id}`.toLowerCase().includes(q))) return false;
+      if (q && !(`${j.name} ${j.id} ${j.capability || ''}`.toLowerCase().includes(q))) return false;
       if (statusFilter && j.status !== statusFilter) return false;
       if (capabilityFilter && j.capability !== capabilityFilter) return false;
       return true;

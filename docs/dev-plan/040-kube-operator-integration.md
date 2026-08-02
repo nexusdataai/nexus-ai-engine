@@ -13,10 +13,11 @@ adrs: []
 
 ## Purpose
 
-Nexus AI Engine ships container images (`nexus-ai-engine-api`, optional
-`nexus-ai-engine-ui`, workers mode on api image) built and rolled out through
-**existing** `nexus-deployer/kube-operator` scripts — same pattern as
-nexus-sre and nexus-backend.
+Nexus AI Engine is deployed as a **standalone capability** (`ai-engine`) via
+nexus-deployer/kube-operator — the same pipeline pattern as **nexus-sre**, not
+bundled into **nexus-ai** (ontology / VDL / Connector).
+
+Example reference: `nexus-deployer/kube-operator/examples/nexus-ai-engine-complete.yaml`
 
 ## Pipeline
 
@@ -57,11 +58,19 @@ Rollout component: `ai-engine` or `ai-engine-api`, `ai-engine-ui`, `ai-engine-wo
 
 ```bash
 cd nexus-deployer/kube-operator
-./bump-version.sh ai-engine-all patch
-./package-images.sh --only-ai-engine-api --only-ai-engine-ui
-./create-ecr-images.sh ai-engine-all
-./app-rollout.sh --capability ai-engine --env staging
+./bump-version.sh ai-engine-api patch
+./package-images.sh --only-ai-engine-api
+./create-ecr-images.sh --only-ai-engine-images
+./app-rollout.sh --capability ai-engine --env dev --version <tag> ai-engine-api
 ```
+
+## Capability vs nexus-ai
+
+| Capability | Repo | What it runs |
+|---|---|---|
+| `nexus-ai` | nexus-backend + nexus-ui | Ontology, VDL, Connector APIs |
+| `nexus-sre` | nexus-sre | SRE planner / executor |
+| **`ai-engine`** | **nexus-ai-engine** | Journey execution, tool compute, dev UI |
 
 ## Kubernetes namespace
 

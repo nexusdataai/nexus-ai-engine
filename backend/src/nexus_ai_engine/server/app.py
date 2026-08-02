@@ -26,6 +26,7 @@ from .routers import reports as reports_router
 from .routers import schedules as schedules_router
 from .routers import stages_registry as stages_registry_router
 from .routers import ui as ui_router
+from .observability import build_metrics_registry
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,7 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
     )
 
     app.state.engine = engine
+    app.state.metrics_registry = build_metrics_registry()
 
     if cors_origins:
         app.add_middleware(

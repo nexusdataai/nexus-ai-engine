@@ -58,6 +58,7 @@ def _journey_templates() -> list[dict]:
                         ("Three-Way Match", "Validate PO qty = delivered qty = invoiced qty"),
                         ("Anomaly Scoring", "Score each order for anomalies vs baselines"),
                         ("Risk Prioritization", "Rank orders by composite risk score"),
+                        ("Workflow Actions", "Route exceptions to collectors and ERP workflows"),
                         ("Cash Flow Projection", "Forecast incoming cash over the next 30 days"),
                     ),
                 ),
@@ -140,7 +141,10 @@ def _journey_templates() -> list[dict]:
         },
         {
             "name": "Supply Chain Risk",
-            "description": "Supplier concentration, geo risk, disruption scenarios.",
+            "description": (
+                "Supplier concentration, geo-political exposure, and disruption "
+                "scenarios for upstream dependency risk."
+            ),
             "capability": "supply-chain-risk",
             "kind": "supply_chain_risk",
             "stages": [
@@ -149,12 +153,12 @@ def _journey_templates() -> list[dict]:
                     name="Supply Chain Risk",
                     description="Identify high-risk suppliers and simulate disruption scenarios.",
                     order=1,
-                    status=StageStatus.pending,
+                    status=StageStatus.running,
                     steps=_steps(
-                        ("Supplier Graph", "Build upstream dependency graph"),
-                        ("Concentration Risk", "Score concentration by geo and tier"),
-                        ("Disruption Simulation", "Run tabletop disruption scenarios"),
-                        ("Mitigation Plan", "Produce actionable mitigations"),
+                        ("Supplier Graph", "Build upstream dependency graph from BOM + PO history"),
+                        ("Concentration Risk", "Score concentration by geo, tier, and single-source SKUs"),
+                        ("Disruption Simulation", "Run tabletop disruption scenarios (port, fab, logistics)"),
+                        ("Mitigation Plan", "Produce actionable mitigations and alternate suppliers"),
                     ),
                 ),
             ],
@@ -327,9 +331,13 @@ def seed(engine: InMemoryEngine, *, seed_random: int | None = 42) -> None:
             }
         )
 
-    # Schedules for the first 3 journeys
+    # Schedules for O2C, call-processing, and supply-chain-risk
     journey_ids = list(engine.journeys.keys())
-    for i, jid in enumerate(journey_ids[:3]):
+    schedule_indices = [0, 1, 4]
+    for i, idx in enumerate(schedule_indices):
+        if idx >= len(journey_ids):
+            continue
+        jid = journey_ids[idx]
         j = engine.journeys[jid]
         if not j.stages:
             continue
@@ -339,7 +347,7 @@ def seed(engine: InMemoryEngine, *, seed_random: int | None = 42) -> None:
             journey_id=jid,
             stage_id=stage.id,
             interval_minutes=15 * (i + 1),
-            enabled=i != 2,  # last one disabled to show both states
+            enabled=True,
             created_at=_now(),
             updated_at=_now(),
             last_run_at=_now() - timedelta(minutes=12),
@@ -347,6 +355,54 @@ def seed(engine: InMemoryEngine, *, seed_random: int | None = 42) -> None:
             last_status="completed",
         )
         engine.schedules[s.id] = s
+
+    # One live running job on supply-chain-risk for the studio UI
+    if len(journey_ids) > 4:
+        sc_jid = journey_ids[4]
+        sc_journey = engine.journeys[sc_jid]
+        if sc_journey.stages:
+            sc_stage = sc_journey.stages[0]
+            running = Job(
+                id=_new_id("JOB"),
+                journey_id=sc_jid,
+                stage_id=sc_stage.id,
+                stage_name=sc_stage.name,
+                execution_number=99,
+                status=JobStatus.running,
+                progress=42,
+                triggered_by="ui",
+                trigger_reason="demo running job",
+                started_at=_now() - timedelta(minutes=3),
+                current_step_id=sc_stage.steps[1].id if len(sc_stage.steps) > 1 else None,
+                step_results=[
+                    StepResult(
+                        step_id=sc_stage.steps[0].id,
+                        status=JobStatus.completed,
+                        progress=100,
+                        started_at=_now() - timedelta(minutes=3),
+                        ended_at=_now() - timedelta(minutes=2),
+                        log_count=12,
+                    ),
+                    StepResult(
+                        step_id=sc_stage.steps[1].id,
+                        status=JobStatus.running,
+                        progress=42,
+                        started_at=_now() - timedelta(minutes=2),
+                        log_count=6,
+                    ),
+                ],
+                metrics=JobMetrics(calls_processed=128, errors=0, warnings=1, success_rate=100.0),
+            )
+            engine.jobs[running.id] = running
+            engine.jobs_by_journey.setdefault(sc_jid, []).append(running.id)
+            sc_journey = sc_journey.model_copy(
+                update={
+                    "jobs_total": sc_journey.jobs_total + 1,
+                    "jobs_running": sc_journey.jobs_running + 1,
+                    "status": JourneyStatus.running,
+                }
+            )
+            engine.journeys[sc_jid] = sc_journey
 
     # Prompts
     prompts = _default_prompts()

@@ -1,0 +1,29 @@
+{
+  "passed": 5,
+  "total": 5,
+  "results": [
+    {
+      "id": "v020-P2-import",
+      "status": 409,
+      "pass": true
+    },
+    {
+      "id": "v020-P2-submit",
+      "pass": true,
+      "execution_id": "514b3efa-74f8-4c78-89b9-997ff66fde24"
+    },
+    {
+      "id": "v020-P3-progress",
+      "pass": true,
+      "status": "succeeded"
+    },
+    {
+      "id": "v020-P4-sse",
+      "pass": true
+    },
+    {
+      "id": "v020-P5-cancel",
+      "pass": true
+    }
+  ]
+}

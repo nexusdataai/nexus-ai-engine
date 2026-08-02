@@ -1,0 +1,1 @@
+{"ready":true,"version":"0.2.0","checks":{"engine":{"status":"ok"},"tool_registry":{"status":"ok","stages":7},"dynamodb":{"status":"ok","journeys_table":"ai-engine-journeys-prod","executions_table":"ai-engine-executions-prod"}}}

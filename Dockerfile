@@ -30,6 +30,8 @@ WORKDIR /build
 
 COPY pyproject.toml README.md LICENSE ./
 COPY backend/src ./backend/src
+COPY packages/nexus-tool-sdk ./packages/nexus-tool-sdk
+COPY packages/tools-o2c ./packages/tools-o2c
 # Test-only artifacts. Always copied into the build context (so the test
 # build can use them) and conditionally retained in the final layer below.
 COPY tests   ./tests-staged
@@ -38,6 +40,7 @@ COPY docs    ./docs-staged
 COPY Makefile tox.ini ./
 
 RUN pip install --upgrade pip setuptools wheel && \
+    pip install --prefer-binary "./packages/nexus-tool-sdk" "./packages/tools-o2c" && \
     if [ "$INCLUDE_TEST_DEPS" = "true" ]; then \
         pip install --prefer-binary ".[server,dev,test,harness]" && \
         mv tests-staged tests && \

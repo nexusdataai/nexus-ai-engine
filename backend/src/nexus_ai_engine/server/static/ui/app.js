@@ -420,7 +420,7 @@ function useTheme() {
 
 function NexusLogo({ className = 'sidebar__logo-svg', gradId = 'neLogoGrad' }) {
   return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
+    <svg viewBox="0 0 32 32" width="28" height="28" className={className} aria-hidden="true">
       <defs>
         <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#7c3aed" />

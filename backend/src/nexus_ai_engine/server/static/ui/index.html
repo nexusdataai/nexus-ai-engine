@@ -5,6 +5,24 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Nexus AI Engine · Journey Studio</title>
     <link rel="icon" type="image/svg+xml" href="/ui/assets/favicon.svg" />
+    <style>
+      /* Critical layout — ensures shell renders before full CSS loads */
+      html, body, #root { height: 100%; margin: 0; }
+      html.dark { color-scheme: dark; background: #0b1220; color: #e6edf3; }
+      .app-boot {
+        min-height: 100vh; display: flex; align-items: center; justify-content: center;
+        color: #94a3b8; background: #0b1220;
+      }
+      .app-boot__inner { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+      .app-boot__logo {
+        width: 48px; height: 48px; border-radius: 8px;
+        background: linear-gradient(135deg, #7c3aed, #4f46e5);
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 800; color: #fff; font-size: 16px;
+      }
+      .app-shell { min-height: 100vh; display: grid; grid-template-columns: auto 1fr; }
+      .sidebar__logo-svg { width: 28px; height: 28px; flex-shrink: 0; }
+    </style>
     <link rel="stylesheet" href="/ui/assets/app.css" />
   </head>
   <body>
@@ -12,13 +30,18 @@
       <div class="app-boot">
         <div class="app-boot__inner">
           <div class="app-boot__logo">NE</div>
-          <div>Loading Journey Studio…</div>
+          <div id="boot-status">Loading Journey Studio…</div>
         </div>
       </div>
     </div>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script type="text/babel" data-presets="env,react" src="/ui/assets/app.js"></script>
+    <script src="/ui/assets/app.bundle.js" defer></script>
+    <script>
+      window.addEventListener('error', function (e) {
+        var el = document.getElementById('boot-status');
+        if (el) el.textContent = 'UI failed to load: ' + (e.message || 'unknown error');
+      });
+    </script>
   </body>
 </html>

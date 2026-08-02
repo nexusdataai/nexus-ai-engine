@@ -22,6 +22,14 @@ EXPECTED_SUBMODULES = [
 ]
 
 
+def test_monorepo_backend_layout() -> None:
+    repo_root = Path(__file__).resolve().parents[2]
+    package_root = repo_root / "backend" / "src" / "nexus_ai_engine"
+    assert package_root.is_dir(), "Expected backend/src/nexus_ai_engine/ monorepo layout"
+    assert (package_root / "contracts").is_dir()
+    assert (repo_root / "backend" / "VERSION").is_file()
+
+
 def test_all_declared_submodules_importable() -> None:
     for name in EXPECTED_SUBMODULES:
         importlib.import_module(f"nexus_ai_engine.{name}")

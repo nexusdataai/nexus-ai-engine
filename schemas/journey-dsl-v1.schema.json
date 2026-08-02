@@ -1,0 +1,608 @@
+{
+  "$defs": {
+    "JourneyConcurrency": {
+      "properties": {
+        "max_parallel_runs": {
+          "default": 1,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Max Parallel Runs",
+          "type": "integer"
+        },
+        "max_parallel_steps": {
+          "default": 4,
+          "maximum": 64,
+          "minimum": 1,
+          "title": "Max Parallel Steps",
+          "type": "integer"
+        }
+      },
+      "title": "JourneyConcurrency",
+      "type": "object"
+    },
+    "JourneyDefaults": {
+      "properties": {
+        "on_failure": {
+          "$ref": "#/$defs/OnFailure",
+          "default": "abort"
+        },
+        "retry": {
+          "$ref": "#/$defs/RetrySpec"
+        },
+        "timeout_s": {
+          "default": 300,
+          "maximum": 14400,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        }
+      },
+      "title": "JourneyDefaults",
+      "type": "object"
+    },
+    "JourneyMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z0-9-]+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "object"
+        },
+        "tenant_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tenant Id"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Updated At"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "version"
+      ],
+      "title": "JourneyMetadata",
+      "type": "object"
+    },
+    "JourneySpec": {
+      "properties": {
+        "concurrency": {
+          "$ref": "#/$defs/JourneyConcurrency"
+        },
+        "defaults": {
+          "$ref": "#/$defs/JourneyDefaults"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "display_name": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "rollback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RollbackSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schedule": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Schedule"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/JourneyStage"
+          },
+          "minItems": 1,
+          "title": "Stages",
+          "type": "array"
+        },
+        "trigger": {
+          "$ref": "#/$defs/JourneyTrigger",
+          "default": "manual"
+        },
+        "variables": {
+          "additionalProperties": true,
+          "title": "Variables",
+          "type": "object"
+        }
+      },
+      "required": [
+        "display_name",
+        "stages"
+      ],
+      "title": "JourneySpec",
+      "type": "object"
+    },
+    "JourneyStage": {
+      "properties": {
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/JourneyStep"
+          },
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "steps"
+      ],
+      "title": "JourneyStage",
+      "type": "object"
+    },
+    "JourneyStep": {
+      "properties": {
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "foreach": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Foreach"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output"
+        },
+        "parallel": {
+          "default": false,
+          "title": "Parallel",
+          "type": "boolean"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RetrySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "risk_class": {
+          "$ref": "#/$defs/RiskClass",
+          "default": "read"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/JourneyStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "timeout_s": {
+          "anyOf": [
+            {
+              "maximum": 14400,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout S"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StepKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "verification": {
+          "items": {
+            "$ref": "#/$defs/StepVerification"
+          },
+          "title": "Verification",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "JourneyStep",
+      "type": "object"
+    },
+    "JourneyTrigger": {
+      "enum": [
+        "manual",
+        "schedule",
+        "event"
+      ],
+      "title": "JourneyTrigger",
+      "type": "string"
+    },
+    "OnFailure": {
+      "enum": [
+        "abort",
+        "continue",
+        "rollback"
+      ],
+      "title": "OnFailure",
+      "type": "string"
+    },
+    "RetrySpec": {
+      "properties": {
+        "backoff_multiplier": {
+          "default": 2.0,
+          "minimum": 1.0,
+          "title": "Backoff Multiplier",
+          "type": "number"
+        },
+        "initial_backoff_s": {
+          "default": 2.0,
+          "minimum": 0.0,
+          "title": "Initial Backoff S",
+          "type": "number"
+        },
+        "jitter": {
+          "default": true,
+          "title": "Jitter",
+          "type": "boolean"
+        },
+        "max_attempts": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "max_backoff_s": {
+          "default": 60.0,
+          "minimum": 0.0,
+          "title": "Max Backoff S",
+          "type": "number"
+        },
+        "retryable_errors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Retryable Errors",
+          "type": "array"
+        }
+      },
+      "title": "RetrySpec",
+      "type": "object"
+    },
+    "RiskClass": {
+      "enum": [
+        "read",
+        "write",
+        "destructive"
+      ],
+      "title": "RiskClass",
+      "type": "string"
+    },
+    "RollbackSpec": {
+      "properties": {
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/RollbackStep"
+          },
+          "title": "Steps",
+          "type": "array"
+        },
+        "strategy": {
+          "default": "none",
+          "enum": [
+            "none",
+            "explicit",
+            "best_effort"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        }
+      },
+      "title": "RollbackSpec",
+      "type": "object"
+    },
+    "RollbackStep": {
+      "properties": {
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "tool": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StepKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "RollbackStep",
+      "type": "object"
+    },
+    "StepKind": {
+      "enum": [
+        "tool_call",
+        "compute",
+        "verify",
+        "approval",
+        "noop"
+      ],
+      "title": "StepKind",
+      "type": "string"
+    },
+    "StepVerification": {
+      "properties": {
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        },
+        "expression": {
+          "title": "Expression",
+          "type": "string"
+        },
+        "on_failure": {
+          "$ref": "#/$defs/VerificationOnFailure",
+          "default": "abort"
+        },
+        "timeout_s": {
+          "default": 30,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "check_id",
+        "expression"
+      ],
+      "title": "StepVerification",
+      "type": "object"
+    },
+    "VerificationOnFailure": {
+      "enum": [
+        "abort",
+        "warn",
+        "ignore"
+      ],
+      "title": "VerificationOnFailure",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Root Journey DSL document (YAML/JSON).",
+  "properties": {
+    "apiVersion": {
+      "const": "nexus.ai/v1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Journey",
+      "default": "Journey",
+      "title": "Kind",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/JourneyMetadata"
+    },
+    "spec": {
+      "$ref": "#/$defs/JourneySpec"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "metadata",
+    "spec"
+  ],
+  "title": "JourneyDefinition",
+  "type": "object"
+}

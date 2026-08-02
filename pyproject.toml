@@ -99,19 +99,19 @@ Repository = "https://github.com/nexusdataai/nexus-ai-engine"
 Issues = "https://github.com/nexusdataai/nexus-ai-engine/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nexus_ai_engine"]
+packages = ["backend/src/nexus_ai_engine"]
 # Ensure the embedded UI assets (HTML/JS/CSS/SVG) ship in the wheel alongside
 # the Python package. Hatchling includes .py by default; everything else
 # needs to be listed explicitly.
 include = [
-    "src/nexus_ai_engine/**/*.py",
-    "src/nexus_ai_engine/server/static/**/*",
-    "src/nexus_ai_engine/py.typed",
+    "backend/src/nexus_ai_engine/**/*.py",
+    "backend/src/nexus_ai_engine/server/static/**/*",
+    "backend/src/nexus_ai_engine/py.typed",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "src/nexus_ai_engine",
+    "backend/src/nexus_ai_engine",
     "tests",
     "README.md",
     "LICENSE",
@@ -132,7 +132,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["src/nexus_ai_engine"]
+source = ["backend/src/nexus_ai_engine"]
 omit = ["*/tests/*"]
 branch = true
 

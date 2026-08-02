@@ -1,0 +1,152 @@
+{
+  "$defs": {
+    "ToolCredentialRef": {
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "scope": {
+          "title": "Scope",
+          "type": "string"
+        },
+        "secret_ref": {
+          "title": "Secret Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "scope",
+        "secret_ref"
+      ],
+      "title": "ToolCredentialRef",
+      "type": "object"
+    },
+    "ToolRequestMode": {
+      "enum": [
+        "read",
+        "write",
+        "destructive"
+      ],
+      "title": "ToolRequestMode",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "arguments": {
+      "additionalProperties": true,
+      "title": "Arguments",
+      "type": "object"
+    },
+    "caller_execution_id": {
+      "format": "uuid",
+      "title": "Caller Execution Id",
+      "type": "string"
+    },
+    "caller_node_id": {
+      "format": "uuid",
+      "title": "Caller Node Id",
+      "type": "string"
+    },
+    "caller_planner_result_id": {
+      "format": "uuid",
+      "title": "Caller Planner Result Id",
+      "type": "string"
+    },
+    "capability": {
+      "title": "Capability",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "credentials": {
+      "items": {
+        "$ref": "#/$defs/ToolCredentialRef"
+      },
+      "title": "Credentials",
+      "type": "array"
+    },
+    "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+    },
+    "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "idempotency_key": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "mode": {
+      "$ref": "#/$defs/ToolRequestMode"
+    },
+    "schema_url": {
+      "default": "nexus.sre/contracts/tool-request/v1",
+      "title": "Schema Url",
+      "type": "string"
+    },
+    "target_scope": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Target Scope",
+      "type": "object"
+    },
+    "tenant_id": {
+      "format": "uuid",
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "timeout_s": {
+      "default": 60,
+      "maximum": 3600,
+      "minimum": 1,
+      "title": "Timeout S",
+      "type": "integer"
+    },
+    "tool_id": {
+      "title": "Tool Id",
+      "type": "string"
+    },
+    "tool_version": {
+      "title": "Tool Version",
+      "type": "string"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "created_at",
+    "tenant_id",
+    "trace_id",
+    "tool_id",
+    "tool_version",
+    "capability",
+    "mode",
+    "idempotency_key",
+    "caller_execution_id",
+    "caller_node_id",
+    "caller_planner_result_id"
+  ],
+  "title": "ToolRequest",
+  "type": "object"
+}

@@ -1,0 +1,340 @@
+{
+  "$defs": {
+    "ExecutionEdge": {
+      "properties": {
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        },
+        "from_node": {
+          "format": "uuid",
+          "title": "From Node",
+          "type": "string"
+        },
+        "kind": {
+          "default": "data",
+          "title": "Kind",
+          "type": "string"
+        },
+        "to_node": {
+          "format": "uuid",
+          "title": "To Node",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_node",
+        "to_node"
+      ],
+      "title": "ExecutionEdge",
+      "type": "object"
+    },
+    "ExecutionNode": {
+      "properties": {
+        "approval_ref": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Approval Ref"
+        },
+        "arguments": {
+          "additionalProperties": true,
+          "title": "Arguments",
+          "type": "object"
+        },
+        "can_parallel": {
+          "default": true,
+          "title": "Can Parallel",
+          "type": "boolean"
+        },
+        "capability": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capability"
+        },
+        "depends_on": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "display_name": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/NodeKind"
+        },
+        "node_id": {
+          "format": "uuid",
+          "title": "Node Id",
+          "type": "string"
+        },
+        "on_failure": {
+          "default": "abort",
+          "title": "On Failure",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "maxLength": 1024,
+          "title": "Reason",
+          "type": "string"
+        },
+        "requires_approval": {
+          "default": false,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "retry_policy": {
+          "$ref": "#/$defs/RetryPolicy"
+        },
+        "risk_class": {
+          "default": "read",
+          "title": "Risk Class",
+          "type": "string"
+        },
+        "rollback_node_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rollback Node Id"
+        },
+        "timeout_s": {
+          "default": 300,
+          "maximum": 14400,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        },
+        "tool_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Id"
+        },
+        "verification": {
+          "items": {
+            "$ref": "#/$defs/NodeVerification"
+          },
+          "title": "Verification",
+          "type": "array"
+        }
+      },
+      "required": [
+        "node_id",
+        "kind"
+      ],
+      "title": "ExecutionNode",
+      "type": "object"
+    },
+    "NodeKind": {
+      "enum": [
+        "tool_call",
+        "verify",
+        "approval",
+        "noop"
+      ],
+      "title": "NodeKind",
+      "type": "string"
+    },
+    "NodeVerification": {
+      "properties": {
+        "check_id": {
+          "title": "Check Id",
+          "type": "string"
+        },
+        "expression": {
+          "title": "Expression",
+          "type": "string"
+        },
+        "timeout_s": {
+          "default": 60,
+          "maximum": 3600,
+          "minimum": 1,
+          "title": "Timeout S",
+          "type": "integer"
+        },
+        "tolerance": {
+          "default": 0.0,
+          "title": "Tolerance",
+          "type": "number"
+        }
+      },
+      "required": [
+        "check_id",
+        "expression"
+      ],
+      "title": "NodeVerification",
+      "type": "object"
+    },
+    "RetryPolicy": {
+      "properties": {
+        "backoff_multiplier": {
+          "default": 2.0,
+          "maximum": 10.0,
+          "minimum": 1.0,
+          "title": "Backoff Multiplier",
+          "type": "number"
+        },
+        "initial_backoff_s": {
+          "default": 1.0,
+          "maximum": 60.0,
+          "minimum": 0.0,
+          "title": "Initial Backoff S",
+          "type": "number"
+        },
+        "jitter": {
+          "default": true,
+          "title": "Jitter",
+          "type": "boolean"
+        },
+        "max_attempts": {
+          "default": 3,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "max_backoff_s": {
+          "default": 60.0,
+          "maximum": 3600.0,
+          "minimum": 0.0,
+          "title": "Max Backoff S",
+          "type": "number"
+        },
+        "retryable_error_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Retryable Error Codes",
+          "type": "array"
+        }
+      },
+      "title": "RetryPolicy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "content_sha256": {
+      "title": "Content Sha256",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/ExecutionEdge"
+      },
+      "title": "Edges",
+      "type": "array"
+    },
+    "id": {
+      "format": "uuid",
+      "title": "Id",
+      "type": "string"
+    },
+    "max_parallelism": {
+      "default": 4,
+      "maximum": 64,
+      "minimum": 1,
+      "title": "Max Parallelism",
+      "type": "integer"
+    },
+    "max_wall_clock_s": {
+      "default": 3600,
+      "maximum": 86400,
+      "minimum": 60,
+      "title": "Max Wall Clock S",
+      "type": "integer"
+    },
+    "nodes": {
+      "items": {
+        "$ref": "#/$defs/ExecutionNode"
+      },
+      "maxItems": 200,
+      "minItems": 1,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "planner_result_id": {
+      "format": "uuid",
+      "title": "Planner Result Id",
+      "type": "string"
+    },
+    "schema_url": {
+      "default": "nexus.sre/contracts/execution-graph/v1",
+      "title": "Schema Url",
+      "type": "string"
+    },
+    "tenant_id": {
+      "format": "uuid",
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "trace_id": {
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "version",
+    "created_at",
+    "tenant_id",
+    "trace_id",
+    "planner_result_id",
+    "nodes",
+    "content_sha256"
+  ],
+  "title": "ExecutionGraph",
+  "type": "object"
+}

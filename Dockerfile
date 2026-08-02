@@ -29,7 +29,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
 WORKDIR /build
 
 COPY pyproject.toml README.md LICENSE ./
-COPY src ./src
+COPY backend/src ./backend/src
 # Test-only artifacts. Always copied into the build context (so the test
 # build can use them) and conditionally retained in the final layer below.
 COPY tests   ./tests-staged

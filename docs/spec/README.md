@@ -57,6 +57,18 @@ journey DSL and DynamoDB persistence.
 
 ---
 
+## Development plan (execution)
+
+Specifications define **what** to build; scrum plans define **when** and **how** to deliver it:
+
+| Path | Purpose |
+|------|---------|
+| [dev-plan/](../dev-plan/README.md) | Master plan, sprints, releases, build plans |
+| [delivery/](../delivery/README.md) | UAT plans per release |
+| [user-guide/](../user-guide/000-user-guide-index.md) | Operator documentation (updated each GA) |
+
+---
+
 ## Related External Specs
 
 - [nexus-sre Executor Overview](../../nexus-sre/docs/executor/100-executor-overview.md)

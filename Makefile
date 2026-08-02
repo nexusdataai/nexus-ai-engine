@@ -18,6 +18,7 @@ IMAGE_NAME    ?= nexus-ai-engine
 IMAGE_TAG     ?= local
 K8S_NS        ?= nexus-ai-engine-dev
 JOURNEY       ?= tests/journeys/samples/hello.yaml
+BACKEND_SRC   := backend/src
 
 .PHONY: help
 help:
@@ -49,6 +50,14 @@ test: ## Fast path: unit tests only
 .PHONY: test-unit
 test-unit: ## Run unit tests
 	$(PYTEST) tests/unit -q
+
+.PHONY: test-contracts
+test-contracts: ## Run Pydantic contract tests
+	$(PYTEST) tests/contracts -q
+
+.PHONY: export-schemas
+export-schemas: ## Export JSON Schema files to schemas/
+	$(PYTHON) -m nexus_ai_engine.contracts.export --out schemas/
 
 .PHONY: test-integration
 test-integration: ## Run integration tests (moto-backed)
@@ -109,27 +118,27 @@ parallel: ## Run the suite in parallel
 
 .PHONY: lint
 lint: ## Ruff lint
-	ruff check src tests
+	ruff check $(BACKEND_SRC) tests
 
 .PHONY: format
 format: ## Ruff format in place
-	ruff format src tests
+	ruff format $(BACKEND_SRC) tests
 
 .PHONY: format-check
 format-check: ## Verify formatting without changes
-	ruff format --check src tests
+	ruff format --check $(BACKEND_SRC) tests
 
 .PHONY: typecheck
 typecheck: ## Mypy on library source
-	mypy src/nexus_ai_engine
+	mypy $(BACKEND_SRC)/nexus_ai_engine
 
 .PHONY: guardrail
 guardrail: ## Boundary check: no imports from nexus-backend
 	@set -e; \
-	if grep -RIn --include='*.py' -E '^\s*(from|import)\s+src(\.|\s)' src tests; then \
+	if grep -RIn --include='*.py' -E '^\s*(from|import)\s+src(\.|\s)' $(BACKEND_SRC) tests; then \
 		echo "ERROR: Library must not import from 'src.*' (nexus-backend internal layout)."; exit 1; \
 	fi; \
-	if grep -RIn --include='*.py' -E '^\s*(from|import)\s+nexus_backend(\.|\s)' src tests; then \
+	if grep -RIn --include='*.py' -E '^\s*(from|import)\s+nexus_backend(\.|\s)' $(BACKEND_SRC) tests; then \
 		echo "ERROR: Library must not import from nexus_backend."; exit 1; \
 	fi; \
 	echo "OK: no nexus-backend imports detected."

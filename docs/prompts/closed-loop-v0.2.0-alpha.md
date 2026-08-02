@@ -38,10 +38,52 @@ You are a **closed-loop delivery agent**. Execute **one build-plan task at a tim
    `/opt/mycode/nexus/nexus-ai-engine/docs/dev-plan/040-kube-operator-integration.md`  
    Repo: `/opt/mycode/nexus/nexus-deployer/kube-operator/`
 
+7. **AWS + EKS context (deploy / cluster test):**  
+   `/opt/mycode/nexus/nexus-deployer/aws-login/set-context.sh`  
+   Registry: `/opt/mycode/nexus/nexus-deployer/aws-login/environments.conf`  
+   Docs: `/opt/mycode/nexus/nexus-deployer/aws-login/README-set-context.md`
+
 ### Repo roots
 
 - AI Engine: `/opt/mycode/nexus/nexus-ai-engine`
 - Deployer: `/opt/mycode/nexus/nexus-deployer`
+
+### AWS + EKS context — mandatory for deploy and cluster tests
+
+**Before any Layer 4 kubectl, kube-operator, or port-forward work**, select environment
+**index `3`** and export it in the current shell:
+
+```bash
+cd /opt/mycode/nexus/nexus-deployer/aws-login
+./set-context.sh 3
+source .active-env
+./set-context.sh --status   # confirm account, cluster, namespace, KUBECONFIG
+```
+
+Index **`3`** in `environments.conf` is the closed-loop target for v0.2.0-alpha deploy
+and cluster verification:
+
+| Field | Value (index 3) |
+|-------|-----------------|
+| Label | Starhub BSSMagic |
+| AWS account | 298722972165 |
+| Cluster | `prod-cluster` |
+| Region | `us-east-1` |
+| Namespace | `nexus-ai-prod` |
+| Context alias | `nexus-prod` |
+| Kubeconfig | `nexus-deployer/aws-login/.kube/config` (not `~/.kube/config`) |
+
+Rules:
+
+- **Always** run `./set-context.sh 3` (or `source ./set-context.sh 3`) at the start of
+  `deploy-dev`, port-forward smoke, and any task that calls `kubectl` or kube-operator
+  scripts against the cluster.
+- kube-operator scripts auto-load `.active-env` via `kube-operator/lib/init-kube-env.sh`;
+  re-run `set-context.sh 3` if AWS credentials expire.
+- Do **not** call `aws eks update-kubeconfig` without `--kubeconfig` — that would
+  overwrite the global `~/.kube/config` and collide with other Cursor windows.
+- If `set-context.sh 3` fails (login, RBAC, missing namespace), stop and report — do
+  not fall back to a different index without asking.
 
 ### Closed-loop rules (mandatory)
 
@@ -121,16 +163,36 @@ Playwright tests must:
 **Layer 4 — Deploy verification (when task is `kube-operator` or `deploy-dev`)**
 
 ```bash
+# 0. Context — ALWAYS index 3 for this release loop
+cd /opt/mycode/nexus/nexus-deployer/aws-login
+./set-context.sh 3
+source .active-env
+./set-context.sh --status
+
+# 1. Build + push (kube-operator picks up KUBECONFIG / AWS_PROFILE from .active-env)
 cd /opt/mycode/nexus/nexus-deployer/kube-operator
 ./bump-version.sh ai-engine-api patch --dry-run
-# If dev cluster available:
+./bump-version.sh ai-engine-api patch
 ./package-images.sh --only-ai-engine-api
-./create-ecr-images.sh ai-engine-api
-./app-rollout.sh --capability ai-engine --env dev
-kubectl get pods -n ai-engine-dev
-kubectl port-forward -n ai-engine-dev svc/nexus-ai-engine-api 8001:8000
-# Re-run Layer 2 + Playwright against port-forward URL
+./create-ecr-images.sh --only-ai-engine-images
+
+# 2. Rollout — use pinned namespace from .active-env when ai-engine is not in ai-engine-{env}
+#    NEXUS_K8S_NAMESPACE is set by set-context.sh 3 (nexus-ai-prod)
+./app-rollout.sh --capability ai-engine --env prod --namespace "${NEXUS_K8S_NAMESPACE}" ai-engine-api
+
+# 3. Verify pods (context + namespace from .active-env)
+kubectl get pods -n "${NEXUS_K8S_NAMESPACE}"
+kubectl get pods -n ai-engine-prod 2>/dev/null || true   # if ai-engine has its own ns
+
+# 4. Port-forward smoke — adjust svc/ns to where nexus-ai-engine-api actually runs
+kubectl get svc -A | grep -i ai-engine || kubectl get svc -n "${NEXUS_K8S_NAMESPACE}"
+kubectl port-forward -n "${NEXUS_K8S_NAMESPACE}" svc/nexus-ai-engine-api 8001:8000
+# Re-run Layer 2 curls against http://127.0.0.1:8001/...
 ```
+
+If the ai-engine Deployment lives in a dedicated namespace (e.g. `ai-engine-prod`), discover
+it with `kubectl get deploy -A | grep ai-engine` after context is set, then port-forward
+that service. Do not change the context index — stay on **3**.
 
 **Layer 5 — UAT matrix (tasks `uat-execute`, `release-cut`)**
 
@@ -161,7 +223,7 @@ kubectl port-forward -n ai-engine-dev svc/nexus-ai-engine-api 8001:8000
 | `api-health` | `/health`, `/readiness`, `/version` return documented shapes |
 | `ui-parity` | Embedded UI matches live routes in ROUTE_PARITY for implemented journeys/jobs |
 | `e2e-smoke` | `tests/e2e/` covers health, journeys list, static UI assets |
-| `deploy-dev` | Pods Ready in dev namespace; smoke passes via port-forward |
+| `deploy-dev` | `./set-context.sh 3` green; pods Ready in target namespace; Layer 2 smoke passes via port-forward |
 | `uat-doc` | Sign-off matrix complete with columns filled |
 | `uat-execute` | P0 100%, P1 ≥90%, evidence linked |
 | `userguide-ch1` | α-G1 passes |
@@ -175,15 +237,17 @@ kubectl port-forward -n ai-engine-dev svc/nexus-ai-engine-api 8001:8000
 - [ ] UAT P0 100% in `010-v0.2.0-alpha-uat.md`
 - [ ] User guide Ch.1–2 accurate
 - [ ] `./bump-version.sh ai-engine-api patch --dry-run` succeeds
-- [ ] Dev deploy verified OR documented blocker with my approval
+- [ ] Dev/prod cluster deploy verified on **set-context index 3** OR documented blocker with my approval
 
 ### How to start
 
 1. Read the build plan and list todos still `pending`.
-2. Start with **`contracts`** only.
-3. After each task, show: **Task ID → PASS/FAIL → next task**.
+2. If resuming after `e2e-smoke`, the next task is **`deploy-dev`** — run
+   `./set-context.sh 3 && source .active-env` before any kubectl/kube-operator work.
+3. Otherwise start with the **first pending** todo only.
+4. After each task, show: **Task ID → PASS/FAIL → next task**.
 
-Begin now with task `contracts`. Do not batch multiple todos in one turn unless I ask.
+Begin with the first `pending` todo in the build plan. Do not batch multiple todos in one turn unless I ask.
 
 ---
 
@@ -197,7 +261,14 @@ Follow: /opt/mycode/nexus/nexus-ai-engine/docs/prompts/closed-loop-v0.2.0-alpha.
 
 Rules: one pending todo at a time; layered verify (pytest → curl → Playwright → UAT); mark todos completed only when green; update UAT matrix and user guide as you go.
 
-Read the build plan frontmatter for the first todo still `pending`, implement it, run verification, then stop and report PASS/FAIL before the next todo.
+Cluster context (mandatory for deploy-dev and kubectl):
+  cd /opt/mycode/nexus/nexus-deployer/aws-login
+  ./set-context.sh 3
+  source .active-env
+
+Index 3 = Starhub BSSMagic / prod-cluster / us-east-1 / namespace nexus-ai-prod.
+
+Read the build plan frontmatter for the first todo still `pending` (expected: `deploy-dev`), implement it, run verification, then stop and report PASS/FAIL before the next todo.
 ```
 
 ---
@@ -207,3 +278,5 @@ Read the build plan frontmatter for the first todo still `pending`, implement it
 - Build plan: `docs/dev-plan/build/v0.2.0-alpha-foundation.plan.md`
 - Planning index: `docs/prompts/planning.md`
 - UAT: `docs/delivery/010-v0.2.0-alpha-uat.md`
+- AWS/EKS context: `nexus-deployer/aws-login/set-context.sh` (use **index 3** for deploy)
+- Context docs: `nexus-deployer/aws-login/README-set-context.md`

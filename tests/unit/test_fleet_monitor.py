@@ -1,0 +1,41 @@
+"""Unit tests for fleet monitor service."""
+
+from __future__ import annotations
+
+from uuid import uuid4
+
+import pytest
+
+from nexus_ai_engine.contracts.execution_state import ExecutionState, ExecutionStatus
+from nexus_ai_engine.execution.runtime_service import ExecutionRuntimeService
+from nexus_ai_engine.fleet.service import FleetMonitorService, _parse_window_hours, _percentile
+
+
+def test_parse_window_hours() -> None:
+    assert _parse_window_hours("24h") == 24
+    assert _parse_window_hours("12") == 12
+    assert _parse_window_hours(None) == 24
+    assert _parse_window_hours("bad") == 24
+
+
+def test_percentile() -> None:
+    assert _percentile([], 95) is None
+    assert _percentile([10.0, 20.0, 30.0], 95) == 30.0
+
+
+@pytest.mark.asyncio
+async def test_summary_counts_in_memory() -> None:
+    runtime = ExecutionRuntimeService()
+    service = FleetMonitorService(runtime=runtime)
+    eid = uuid4()
+    runtime.manager._executions[eid] = ExecutionState(
+        execution_id=eid,
+        journey_id="demo",
+        journey_version=1,
+        tenant_id=str(uuid4()),
+        status=ExecutionStatus.RUNNING,
+        graph_snapshot_id=uuid4(),
+    )
+    summary = await service.summary()
+    assert summary["active"] == 1
+    assert summary["queued"] == 0

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nexus-ai-engine-ui
+  labels:
+    app: nexus-ai-engine-ui
+    app.kubernetes.io/name: nexus-ai-engine-ui
+    app.kubernetes.io/component: ui
+spec:
+  type: ClusterIP
+  selector:
+    app: nexus-ai-engine-ui
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

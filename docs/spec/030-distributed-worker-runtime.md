@@ -192,17 +192,21 @@ make serve-workers
 
 ---
 
-## Observability
+## Observability (indigenous — no external product dependency)
 
-| Metric | Type |
-|--------|------|
-| `nexus_ai_executions_active` | Gauge |
-| `nexus_ai_execution_queue_depth` | Gauge |
-| `nexus_ai_worker_ticks_total` | Counter |
-| `nexus_ai_tool_dispatch_duration_seconds` | Histogram |
-| `nexus_ai_stage_run_duration_seconds` | Histogram |
+Metrics are exposed via the **Fleet API** and **Journey Studio** dashboard. Data comes from the executions store, admission controller, and worker heartbeats the framework already maintains.
 
-Dashboard: Grafana "AI Engine Executions" (to be added to deploy/).
+| Signal | Fleet API field / UI widget |
+|--------|----------------------------|
+| Active executions | `fleet.summary.active` |
+| Queue depth | `fleet.summary.queued` |
+| Tool dispatch latency | `fleet.metrics.tool_dispatch_p95` |
+| Worker health | `fleet.workers[]` heartbeat + status |
+| Failed executions | executions list filter + alerts |
+
+Optional: `GET /metrics` remains available as Prometheus text for sites that choose to scrape later — not required for GA UAT.
+
+Alerts: built-in evaluator → `GET /api/v1/alerts` + UI banner (failed exec, worker stale, circuit open).
 
 ---
 

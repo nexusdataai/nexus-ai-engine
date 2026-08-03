@@ -1,0 +1,20 @@
+v0.3.0 UAT — 2026-08-02 (ai-engine-prod)
+
+Playwright (local, mocked API):
+  v030-U1 dashboard active count     PASS
+  v030-U4 validate DSL               PASS
+  v030-U5 tool picker                PASS
+  v030-U6 tools catalog              PASS
+  v030-U7 keyboard nav               PASS
+
+Cluster smoke (port-forward):
+  GET /health                        200 version=0.3.0
+  GET /readiness                     200 dynamodb=ok
+  GET /api/v1/executions/            200 (regression v0.2.0)
+  UI /healthz                        200
+  UI /                               200 Journey Studio title
+
+Deploy:
+  API image: 298722972165.dkr.ecr.us-east-1.amazonaws.com/nexus-ai-engine-api:0.3.0-1fcdd34
+  UI image:  298722972165.dkr.ecr.us-east-1.amazonaws.com/nexus-ai-engine-ui:0.3.0-1fcdd34
+  Namespace: ai-engine-prod

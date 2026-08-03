@@ -1,0 +1,18 @@
+# GET /api/v1/fleet/summary
+HTTP 200
+{"active":0,"queued":0,"failed":0,"workers":1,"global_limit":10,"running_counter":null,"generated_at":"2026-08-02T22:36:05.392536+00:00"}
+
+# GET /api/v1/fleet/metrics?window=24h
+HTTP 200
+{"window_hours":24,"throughput":{"submitted":0,"succeeded":0,"failed":0},"tool_dispatch_p95_ms":null,"timeline":[],"generated_at":"2026-08-02T22:36:05.393614+00:00"}
+
+# GET /api/v1/fleet/workers
+HTTP 200
+{"workers":[{"worker_id":"local-api","role":"api","status":"healthy","active_tasks":0,"last_seen":"2026-08-02T22:36:05.394260+00:00"}],"generated_at":"2026-08-02T22:36:05.394265+00:00"}
+
+---
+computing gzip size...
+dist/index.html                   0.42 kB │ gzip:   0.29 kB
+dist/assets/index-BmgTQeJg.css   31.95 kB │ gzip:   6.49 kB
+dist/assets/index-D0aaBGgY.js   445.67 kB │ gzip: 141.88 kB │ map: 1,911.53 kB
+✓ built in 2.98s

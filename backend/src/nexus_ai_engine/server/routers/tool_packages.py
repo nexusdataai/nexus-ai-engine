@@ -17,6 +17,14 @@ from ._deps import get_engine
 router = APIRouter()
 
 
+def _tool_registry(engine):
+    registry = getattr(engine, "tool_registry", None)
+    if registry is None:
+        from ...registry.registry import ToolRegistry
+        return ToolRegistry()
+    return registry
+
+
 async def _parse_manifest_body(request: Request) -> dict[str, Any]:
     raw = await request.body()
     if not raw:
@@ -51,7 +59,7 @@ async def publish_tool_package(
 ) -> dict[str, Any]:
     manifest = _validate_manifest(await _parse_manifest_body(request))
     try:
-        count = engine.tool_registry.load_package(manifest)
+        count = _tool_registry(engine).load_package(manifest)
     except ToolLoadError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
@@ -70,7 +78,7 @@ async def list_tools(
     domain: str | None = None,
     engine: InMemoryEngine = Depends(get_engine),
 ) -> dict[str, Any]:
-    descriptors = engine.tool_registry.list_tools(domain=domain)
+    descriptors = _tool_registry(engine).list_tools(domain=domain)
     return {
         "tools": [d.model_dump(mode="json") for d in descriptors],
         "total": len(descriptors),
@@ -84,7 +92,7 @@ async def get_tool(
     engine: InMemoryEngine = Depends(get_engine),
 ) -> dict[str, Any]:
     try:
-        tool = engine.tool_registry.get(tool_id, version)
+        tool = _tool_registry(engine).get(tool_id, version)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return tool.descriptor().model_dump(mode="json")

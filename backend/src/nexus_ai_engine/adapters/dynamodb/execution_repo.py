@@ -212,6 +212,37 @@ class DynamoDBExecutionRepository:
 
         await self._run(_delete)
 
+    async def list_active_locks(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        """Return execution worker locks currently stored in DynamoDB."""
+
+        def _scan():
+            items: list[dict] = []
+            scan_kwargs: dict[str, Any] = {
+                "FilterExpression": "begins_with(PK, :pfx) AND SK = :sk",
+                "ExpressionAttributeValues": {":pfx": "LOCK#EXEC#", ":sk": "LOCK"},
+            }
+            while len(items) < limit:
+                resp = self._table.scan(**scan_kwargs)
+                items.extend(resp.get("Items", []))
+                if "LastEvaluatedKey" not in resp:
+                    break
+                scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+            return items[:limit]
+
+        raw = await self._run(_scan)
+        locks: list[dict[str, Any]] = []
+        for item in raw:
+            pk = str(item.get("PK", ""))
+            execution_id = pk.removeprefix("LOCK#EXEC#") if pk.startswith("LOCK#EXEC#") else None
+            locks.append(
+                {
+                    "execution_id": execution_id,
+                    "worker_id": item.get("worker_id"),
+                    "ttl": item.get("ttl"),
+                }
+            )
+        return locks
+
     async def increment_running(self) -> int:
         def _inc():
             resp = self._table.update_item(

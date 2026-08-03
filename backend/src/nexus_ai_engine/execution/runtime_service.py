@@ -131,10 +131,11 @@ class ExecutionRuntimeService:
         *,
         journey_id: str | None = None,
         status_filter: str | None = None,
+        limit: int = 50,
     ) -> list[ExecutionState]:
         if self.repository is not None:
             return await self.repository.list_executions(
-                tenant_id, journey_id=journey_id, status=status_filter
+                tenant_id, journey_id=journey_id, status=status_filter, limit=limit
             )
         items = self.manager.list_executions()
         if journey_id:

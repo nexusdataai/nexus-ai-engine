@@ -8,8 +8,10 @@ resources:
   - serviceaccount.yaml
   - configmap.yaml
   - deployment.yaml
+  - ui-deployment.yaml
   - worker-deployment.yaml
   - service.yaml
+  - ui-service.yaml
   - hpa.yaml
   - worker-hpa.yaml
   - networkpolicy.yaml

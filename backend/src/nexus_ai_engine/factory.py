@@ -53,6 +53,7 @@ class Engine:
     execution_runtime: "ExecutionRuntimeService"
     dsl_store: "DslJourneyStore"
     artifacts: "S3ArtifactStore"
+    tool_registry: "ToolRegistry"
 
     @property
     def stage_registry(self) -> dict:
@@ -110,6 +111,7 @@ def build_engine(
     from .executor.admission import AdmissionController
     from .journeys.service import DslJourneyStore
     from .execution.transformation_job_executor import TransformationJobExecutor
+    from .registry.registry import ToolRegistry
     from .services import (
         JourneyService,
         LogsAndReportsService,
@@ -135,4 +137,5 @@ def build_engine(
         execution_runtime=runtime,
         dsl_store=DslJourneyStore(),
         artifacts=S3ArtifactStore(),
+        tool_registry=ToolRegistry(),
     )

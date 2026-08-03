@@ -11,7 +11,7 @@ Use this prompt in **Cursor Agent mode**. Attach the build plan:
 
 You are a **closed-loop delivery agent**. Execute **one build-plan task at a time** from the authoritative plan below. Do **not** start the next task until the current task's success criteria and verification gates pass.
 
-This is **production GA**: Copilot decoupling, 500 concurrent load, security, Grafana, prod UAT, admin guides.
+This is **production GA**: Copilot decoupling, 500 concurrent load, security, **indigenous fleet monitoring**, prod UAT, admin guides.
 
 ### Authoritative inputs (read first)
 
@@ -95,15 +95,17 @@ make test-integration
 | v100-L1 | 500 concurrent load test PASS |
 | v100-S1 | Pen test sev1 = 0 |
 | v100-S2 | mTLS engine ↔ ontology |
-| v100-O1 | Grafana dashboards live |
+| v100-O1 | Fleet Monitor dashboard in Journey Studio shows execution metrics | P0 |
+| v100-O2 | Fleet alerts fire and ack via UI + `/api/v1/alerts` | P0 |
 | v100-G1 | Ch.8 admin deployment walkthrough |
 | v100-G2 | Ch.9 troubleshooting scenarios |
 
-**Layer 4 — Observability (`grafana`, `alerts`)**
+**Layer 4 — Observability (`fleet-monitor`, `fleet-alerts`)**
 
-- Dashboards: executions, queue depth, tool/VDL latency, worker health  
-- Alerts: failed executions, worker down, ontology circuit open  
-- Evidence: dashboard URLs or export JSON in `docs/delivery/evidence/v1.0.0/`
+- Fleet API: executions, queue depth, tool/VDL latency, worker health  
+- Alerts: failed executions, worker down, ontology circuit open — built into engine + UI  
+- Evidence: curl + UI screenshots in `docs/delivery/evidence/v1.0.0/`  
+- No Grafana/Mimir/Prometheus required for UAT sign-off
 
 **Layer 5 — Production deploy (`release-cut`)**
 
@@ -129,8 +131,8 @@ kubectl get pods -n ai-engine-prod
 |---------|-----------|
 | `engine-client` | nexus-backend HTTP client for POST `/executions` |
 | `copilot-decouple` | Flag `AI_ENGINE_EXECUTION_ENABLED`; prod execute_plan deprecated |
-| `grafana` | Dashboards deployed and linked |
-| `alerts` | Alert rules firing on synthetic failure test |
+| `fleet-monitor` | Fleet API + Journey Studio monitoring dashboard live |
+| `fleet-alerts` | Alert evaluator + `/api/v1/alerts` + UI; synthetic failure test PASS |
 | `mtls` | mTLS between AI Engine and ontology verified |
 | `load-500` | 500 concurrent PASS; evidence log |
 | `pentest` | Sev1 = 0 or documented exception |
@@ -146,7 +148,7 @@ kubectl get pods -n ai-engine-prod
 - [ ] Copilot fully decoupled in prod  
 - [ ] 500 concurrent load PASS  
 - [ ] Pen test sev1 = 0  
-- [ ] Grafana + alerts operational  
+- [ ] Indigenous fleet monitor + alerts operational  
 - [ ] Prod UAT signed (PO, Security, SRE, QA)  
 - [ ] User guide Ch.8–9 complete  
 

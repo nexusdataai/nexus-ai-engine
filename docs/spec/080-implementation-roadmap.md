@@ -195,7 +195,7 @@ Phase 10 ─► nexus-backend decoupling + production hardening
 | Remove duplicate journey execution from backend | CopilotEngine submits to engine |
 | Load tests | 500 concurrent executions |
 | Security review | Pen test, IAM least privilege |
-| Observability | Grafana dashboards, alerts |
+| Observability | Indigenous Fleet Monitor API + Journey Studio dashboard + built-in alerts |
 | Documentation | Operator runbook |
 | Release | v0.2.0 stable |
 

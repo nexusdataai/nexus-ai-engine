@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .. import __version__
 from ..execution import InMemoryEngine
 from .routers import executions as executions_router
+from .routers import fleet as fleet_router
 from .routers import health as health_router
 from .routers import jobs as jobs_router
 from .routers import journey_dsl_api as journey_dsl_router
@@ -100,6 +101,7 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
     app.include_router(health_router.router, tags=["health"])
     app.include_router(ui_router.router, tags=["ui"])
     app.include_router(stages_registry_router.router, tags=["stages"])
+    app.include_router(fleet_router.router, prefix=API_V1_PREFIX, tags=["fleet"])
 
     # Engine surface — branch on engine kind. The InMemoryEngine path is the
     # default (no DynamoDB config supplied); the production path activates

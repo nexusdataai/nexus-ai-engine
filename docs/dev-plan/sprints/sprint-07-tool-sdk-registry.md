@@ -17,7 +17,7 @@ Ship `nexus-tool-sdk` and Tool base class; begin ontology VDL API promotion on n
 
 | ID | Story | Pts | Epic |
 |---|---|---|---|
-| STORY-7-1 | `packages/nexus-tool-sdk/` VdlClient | 8 | EPIC-tool-sdk |
+| STORY-7-1 | `sdk/nexus-tool-sdk/` VdlClient | 8 | EPIC-tool-sdk |
 | STORY-7-2 | ConnectorClient + ToolRuntime | 5 | EPIC-tool-sdk |
 | STORY-7-3 | Tool base class (nexus-sre aligned) | 5 | EPIC-tool-registry |
 | STORY-7-4 | ToolRegistry in-memory + get/list | 5 | EPIC-tool-registry |

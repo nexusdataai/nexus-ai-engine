@@ -1,9 +1,0 @@
-2026-05-10 11:53:25 | INFO     | ================================================================================
-2026-05-10 11:53:25 | INFO     | STAGE STARTED: order_to_cash
-2026-05-10 11:53:25 | INFO     | Journey: JRN-DEMO | Job: JOB-DEMO
-2026-05-10 11:53:25 | INFO     | ================================================================================
-2026-05-10 11:53:25 | INFO     | [entity_resolution] Starting Entity Resolution (3 ticks, sleep 0.0-0.0s)
-2026-05-10 11:53:25 | INFO     | [entity_resolution] [entity_resolution] Processing batch 61 (tick 1/3)
-2026-05-10 11:53:25 | INFO     | [entity_resolution] [entity_resolution] Pushed 106 items downstream (tick 2/3)
-2026-05-10 11:53:25 | INFO     | [entity_resolution] [entity_resolution] Processing batch 79 (tick 3/3)
-2026-05-10 11:53:25 | INFO     | [entity_resolution] Completed Entity Resolution: 245 items across 3 ticks

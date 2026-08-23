@@ -42,7 +42,7 @@ Starhub `ai-engine-prod` has no co-located ontology pod. Live rc2-T2 / rc2-O1 / 
 ```bash
 cd /opt/mycode/nexus/nexus-ai-engine
 source .venv/bin/activate
-export PYTHONPATH="/opt/mycode/nexus/nexus-backend:/opt/mycode/nexus/nexus-ai-engine/backend/src:/opt/mycode/nexus/nexus-ai-engine/packages/nexus-tool-sdk/src:/opt/mycode/nexus/nexus-ai-engine/packages/tools-o2c/src"
+export PYTHONPATH="/opt/mycode/nexus/nexus-backend:/opt/mycode/nexus/nexus-ai-engine/backend/src:/opt/mycode/nexus/nexus-ai-engine/sdk/nexus-tool-sdk/src:/opt/mycode/nexus/nexus-ai-engine/sdk/tools-o2c/src"
 python docs/delivery/evidence/v0.2.0-rc2/live_vdl_uat.py
 ```
 

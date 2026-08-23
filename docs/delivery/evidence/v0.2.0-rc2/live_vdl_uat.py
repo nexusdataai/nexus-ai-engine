@@ -22,7 +22,7 @@ BACKEND_ROOT = os.environ.get(
 ENGINE_ROOT = os.environ.get(
     "NEXUS_AI_ENGINE_ROOT", "/opt/mycode/nexus/nexus-ai-engine"
 )
-for root in (BACKEND_ROOT, f"{ENGINE_ROOT}/backend/src", f"{ENGINE_ROOT}/packages/tools-o2c/src"):
+for root in (BACKEND_ROOT, f"{ENGINE_ROOT}/backend/src", f"{ENGINE_ROOT}/sdk/tools-o2c/src"):
     if root not in sys.path:
         sys.path.insert(0, root)
 

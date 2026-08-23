@@ -11,7 +11,6 @@ Configuration Loading:
 
 import os
 import logging
-from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional
 
@@ -25,35 +24,30 @@ def _load_env_local():
     """Load environment variables from .env.local for local development.
 
     The library is import-safe: it does NOT auto-load .env files. The host
-    application is responsible for loading its own environment. This function
-    is kept for backward compatibility but is a no-op when imported as a library.
+    application is responsible for loading its own environment via Makefile
+    or explicit load_dotenv() before importing nexus_ai_engine.
     """
-    # Library does not auto-load .env. Host app should call load_dotenv()
-    # before importing nexus_ai_engine.
     return
-    # Skip if running on ECS
-    if os.getenv('ECS_CONTAINER_METADATA_URI') or os.getenv('ECS_CONTAINER_METADATA_URI_V4'):
-        return
-    
-    project_root = Path(__file__).parent.parent.parent
-    env_files = [project_root / ".env.local", project_root / ".env"]
-    
-    for env_file in env_files:
-        if env_file.exists():
-            try:
-                with open(env_file) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#') and '=' in line:
-                            key, value = line.split('=', 1)
-                            key, value = key.strip(), value.strip().strip('"').strip("'")
-                            if key not in os.environ:
-                                os.environ[key] = value
-            except Exception as e:
-                logger.warning(f"Failed to load {env_file}: {e}")
-            break
 
 _load_env_local()
+
+_SERVICE_ENDPOINT_VARS: dict[str, tuple[str, ...]] = {
+    "dynamodb": ("SCYLLA_ENDPOINT", "DYNAMODB_ENDPOINT", "AWS_ENDPOINT_URL_DYNAMODB"),
+    "s3": ("MINIO_ENDPOINT", "S3_ENDPOINT", "AWS_ENDPOINT_URL_S3"),
+    "glue": ("MINISTACK_ENDPOINT", "GLUE_ENDPOINT", "AWS_ENDPOINT_URL_GLUE"),
+}
+
+
+def _first_env(*keys: str) -> Optional[str]:
+    for key in keys:
+        value = os.getenv(key)
+        if value:
+            return value.strip()
+    return None
+
+
+def _split_endpoints_configured() -> bool:
+    return any(_first_env(*keys) for keys in _SERVICE_ENDPOINT_VARS.values())
 
 
 @dataclass
@@ -93,7 +87,12 @@ class LocalStackConfig:
             LocalStackConfig instance with settings from environment
         """
         use_localstack = os.getenv('USE_LOCALSTACK', 'false').lower().strip()
-        enabled = use_localstack == 'true'
+        aws_emulation = os.getenv('AWS_EMULATION', '').lower().strip()
+        enabled = (
+            use_localstack == 'true'
+            or aws_emulation == 'local'
+            or _split_endpoints_configured()
+        )
         
         host = os.getenv('LOCALSTACK_HOST', 'localhost').strip()
         
@@ -160,20 +159,26 @@ class LocalStackConfig:
         Returns:
             Endpoint URL if LocalStack is enabled, None otherwise
         """
+        # Per-service split endpoints (K3s Scylla/MinIO/MiniStack)
+        for env_key in _SERVICE_ENDPOINT_VARS.get(service, ()):
+            override = _first_env(env_key)
+            if override:
+                return override
+
         if not self.enabled:
             return None
-        
+
         # Check for service-specific endpoint override
         env_var = f"AWS_ENDPOINT_URL_{service.upper()}"
         override = os.getenv(env_var)
         if override:
             return override.strip()
-        
+
         # Check for general endpoint override
         general_override = os.getenv('AWS_ENDPOINT_URL')
         if general_override:
             return general_override.strip()
-        
+
         # Use LocalStack gateway endpoint
         return self.endpoint_url
     

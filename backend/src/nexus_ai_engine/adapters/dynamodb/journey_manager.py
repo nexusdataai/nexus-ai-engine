@@ -247,6 +247,67 @@ class ComprehensiveJourneyManager:
     # JOURNEY METADATA MANAGEMENT
     # ==========================================
     
+    def _journey_summaries_from_items(
+        self,
+        items: List[Dict],
+        status_filter: Optional[str] = None,
+        component_type_filter: Optional[str] = None,
+    ) -> List[Dict]:
+        journeys: List[Dict] = []
+        for item in items:
+            journey_data = item.get("Data") or {}
+            if status_filter and journey_data.get("status") != status_filter:
+                continue
+            if component_type_filter and journey_data.get("odaComponentType") != component_type_filter:
+                continue
+            aggregates = journey_data.get("aggregates", {})
+            journeys.append(
+                {
+                    "journeyId": journey_data.get("journeyId"),
+                    "name": journey_data.get("name"),
+                    "description": journey_data.get("description"),
+                    "status": journey_data.get("status"),
+                    "priority": journey_data.get("priority"),
+                    "odaComponentType": journey_data.get("odaComponentType"),
+                    "overallProgress": journey_data.get("overallProgress", 0),
+                    "currentStageId": journey_data.get("currentStageId"),
+                    "createdAt": item.get("CreatedAt"),
+                    "updatedAt": item.get("UpdatedAt"),
+                    "createdBy": journey_data.get("createdBy"),
+                    "totalRules": aggregates.get("totalRules", 0),
+                    "activeRules": aggregates.get("activeRules", 0),
+                    "totalJobs": aggregates.get("totalJobs", 0),
+                    "completedJobs": aggregates.get("completedJobs", 0),
+                    "failedJobs": aggregates.get("failedJobs", 0),
+                }
+            )
+        return journeys
+
+    def _list_journeys_via_scan(
+        self,
+        status_filter: Optional[str] = None,
+        component_type_filter: Optional[str] = None,
+    ) -> List[Dict]:
+        """Fallback for backends (e.g. Scylla Alternator) where GSI queries fail."""
+        from boto3.dynamodb.conditions import Attr
+
+        print_with_flush("📋 Listing journeys via METADATA scan (GSI fallback)...")
+        items: List[Dict] = []
+        scan_kwargs = {
+            "FilterExpression": Attr("EntityType").eq("Journey") & Attr("SK").eq("METADATA"),
+        }
+        while True:
+            response = self.table.scan(**scan_kwargs)
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
+
+        journeys = self._journey_summaries_from_items(items, status_filter, component_type_filter)
+        print_with_flush(f"✅ Found {len(journeys)} journeys (scan fallback)")
+        return journeys
+
     def list_journeys(self, status_filter: Optional[str] = None, 
                      component_type_filter: Optional[str] = None) -> List[Dict]:
         """List all journeys with optional filtering"""
@@ -261,43 +322,23 @@ class ComprehensiveJourneyManager:
                 }
             )
             
-            journeys = []
-            for item in response['Items']:
-                journey_data = item['Data']
-                
-                # Apply filters
-                if status_filter and journey_data.get('status') != status_filter:
-                    continue
-                if component_type_filter and journey_data.get('odaComponentType') != component_type_filter:
-                    continue
-                
-                aggregates = journey_data.get('aggregates', {})
-                journeys.append({
-                    'journeyId': journey_data.get('journeyId'),
-                    'name': journey_data.get('name'),
-                    'description': journey_data.get('description'),
-                    'status': journey_data.get('status'),
-                    'priority': journey_data.get('priority'),
-                    'odaComponentType': journey_data.get('odaComponentType'),
-                    'overallProgress': journey_data.get('overallProgress', 0),
-                    'currentStageId': journey_data.get('currentStageId'),
-                    'createdAt': item.get('CreatedAt'),
-                    'updatedAt': item.get('UpdatedAt'),
-                    'createdBy': journey_data.get('createdBy'),
-                    'totalRules': aggregates.get('totalRules', 0),
-                    'activeRules': aggregates.get('activeRules', 0),
-                    'totalJobs': aggregates.get('totalJobs', 0),
-                    'completedJobs': aggregates.get('completedJobs', 0),
-                    'failedJobs': aggregates.get('failedJobs', 0)
-                })
+            journeys = self._journey_summaries_from_items(
+                response.get("Items", []),
+                status_filter,
+                component_type_filter,
+            )
             
             print_with_flush(f'✅ Found {len(journeys)} journeys')
             return journeys
             
         except Exception as e:
-            print_with_flush(f'❌ Error listing journeys: {str(e)}')
-            traceback.print_exc()
-            return []
+            print_with_flush(f'⚠️ GSI1 list failed ({e}); using scan fallback')
+            try:
+                return self._list_journeys_via_scan(status_filter, component_type_filter)
+            except Exception as scan_exc:
+                print_with_flush(f'❌ Error listing journeys: {str(scan_exc)}')
+                traceback.print_exc()
+                return []
     
     def get_journey_complete(self, journey_id: str) -> Optional[Dict]:
         """Get complete journey information including stages and rules"""
@@ -669,10 +710,10 @@ class ComprehensiveJourneyManager:
                 return []
             
             response = self.table.query(
-                IndexName='GSI1',
-                KeyConditionExpression='GSI1PK = :pk',
+                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
                 ExpressionAttributeValues={
-                    ':pk': f'JOURNEY#{clean_id}#STAGES'
+                    ':pk': f'JOURNEY#{clean_id}',
+                    ':sk': 'STAGE#',
                 }
             )
             
@@ -1247,10 +1288,10 @@ class ComprehensiveJourneyManager:
                 return []
             
             response = self.table.query(
-                IndexName='GSI1',
-                KeyConditionExpression='GSI1PK = :pk',
+                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
                 ExpressionAttributeValues={
-                    ':pk': f'JOURNEY#{clean_id}#RULES'
+                    ':pk': f'JOURNEY#{clean_id}',
+                    ':sk': 'RULE#',
                 }
             )
             

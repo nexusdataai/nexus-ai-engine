@@ -1,7 +1,7 @@
 """DynamoDB table schemas for Nexus AI Engine (spec 050).
 
 Used by moto integration tests and local provisioning helpers.
-CloudFormation source of truth: deploy/cloudformation/ai-engine-storage.yaml
+CloudFormation source of truth: scripts/legacy-deploy/cloudformation/ai-engine-storage.yaml
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from typing import Any
 
 
 def table_names(env: str) -> dict[str, str]:
+    """Legacy remote AWS / CloudFormation naming: ai-engine-{purpose}-{env}."""
     return {
         "journeys": f"ai-engine-journeys-{env}",
         "executions": f"ai-engine-executions-{env}",
@@ -17,24 +18,47 @@ def table_names(env: str) -> dict[str, str]:
     }
 
 
+def table_names_for(capability: str, environment: str) -> dict[str, str]:
+    """Operator / local K3s naming: {capability}-{environment}-{purpose}."""
+    cap = capability.strip().lower()
+    env = environment.strip().lower()
+    return {
+        "journeys": f"{cap}-{env}-journeys",
+        "executions": f"{cap}-{env}-executions",
+        "prompts": f"{cap}-{env}-prompts",
+    }
+
+
 def s3_bucket_names(env: str) -> dict[str, str]:
+    """Legacy remote AWS / CloudFormation S3 naming."""
     return {
         "logs": f"ai-engine-journey-logs-{env}",
         "reports": f"ai-engine-journey-reports-{env}",
     }
 
 
+def s3_bucket_names_for(capability: str, environment: str) -> dict[str, str]:
+    """Operator / local K3s S3 naming."""
+    cap = capability.strip().lower()
+    env = environment.strip().lower()
+    return {
+        "logs": f"{cap}-{env}-journey-logs",
+        "reports": f"{cap}-{env}-journey-reports",
+    }
+
+
 def journeys_table_definition(table_name: str) -> dict[str, Any]:
+    # Legacy journey_manager / scheduler / job executor write GSI1PK/GSI1SK on
+    # every item. Match transformation-system single-table indexing so GSI
+    # queries work on AWS DynamoDB and Scylla Alternator alike.
     return {
         "TableName": table_name,
         "BillingMode": "PAY_PER_REQUEST",
         "AttributeDefinitions": [
             {"AttributeName": "PK", "AttributeType": "S"},
             {"AttributeName": "SK", "AttributeType": "S"},
-            {"AttributeName": "entity_type", "AttributeType": "S"},
-            {"AttributeName": "updated_at", "AttributeType": "S"},
-            {"AttributeName": "status", "AttributeType": "S"},
-            {"AttributeName": "started_at", "AttributeType": "S"},
+            {"AttributeName": "GSI1PK", "AttributeType": "S"},
+            {"AttributeName": "GSI1SK", "AttributeType": "S"},
         ],
         "KeySchema": [
             {"AttributeName": "PK", "KeyType": "HASH"},
@@ -44,16 +68,8 @@ def journeys_table_definition(table_name: str) -> dict[str, Any]:
             {
                 "IndexName": "GSI1",
                 "KeySchema": [
-                    {"AttributeName": "entity_type", "KeyType": "HASH"},
-                    {"AttributeName": "updated_at", "KeyType": "RANGE"},
-                ],
-                "Projection": {"ProjectionType": "ALL"},
-            },
-            {
-                "IndexName": "GSI2",
-                "KeySchema": [
-                    {"AttributeName": "status", "KeyType": "HASH"},
-                    {"AttributeName": "started_at", "KeyType": "RANGE"},
+                    {"AttributeName": "GSI1PK", "KeyType": "HASH"},
+                    {"AttributeName": "GSI1SK", "KeyType": "RANGE"},
                 ],
                 "Projection": {"ProjectionType": "ALL"},
             },

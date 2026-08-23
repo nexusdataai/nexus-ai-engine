@@ -22,9 +22,9 @@ Implement full Journey DSL Pydantic models and semantic validator per `010-journ
 | STORY-3-3 | Semantic rules: unique step ids, valid tool refs (warn) | 5 | EPIC-jrn-validator |
 | STORY-3-4 | `POST /journeys/validate` endpoint | 3 | EPIC-api-journeys |
 | STORY-3-5 | Unit tests: valid + invalid DSL fixtures | 5 | EPIC-jrn-validator |
-| STORY-3-6 | Export `schemas/journey-dsl-v1.json` | 2 | EPIC-plat-contracts |
+| STORY-3-6 | Export `backend/schemas/journey-dsl-v1.json` | 2 | EPIC-plat-contracts |
 | STORY-3-7 | Draft UAT v0.2.0-beta | 3 | EPIC-doc-uat-beta |
-| STORY-3-8 | Examples: 5 journey YAMLs in `examples/journeys/` | 5 | EPIC-jrn-dsl-models |
+| STORY-3-8 | Examples: 5 journey YAMLs in `sdk/examples/journeys/` | 5 | EPIC-jrn-dsl-models |
 
 ## Definition of Done
 

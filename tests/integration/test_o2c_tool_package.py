@@ -9,7 +9,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from nexus_ai_engine.testing import make_test_app
 
-O2C_MANIFEST = Path(__file__).resolve().parents[2] / "examples/tool-packages/o2c/manifest.json"
+O2C_MANIFEST = Path(__file__).resolve().parents[2] / "sdk/examples/tool-packages/o2c/manifest.json"
 
 
 @pytest.mark.asyncio

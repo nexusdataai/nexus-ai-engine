@@ -24,8 +24,8 @@ Examples:
   
   # From test runner
   python tests/report_generators/generate_bdd_report.py \\
-    --input test_reports/bdd/results.json \\
-    --output test_reports/bdd/index.html
+    --input tests/reports/bdd/results.json \\
+    --output tests/reports/bdd/index.html
         '''
     )
     

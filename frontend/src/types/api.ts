@@ -34,6 +34,23 @@ export type DslJourneySummary = {
   labels?: Record<string, string>;
 };
 
+export type SimpleJourneySummary = {
+  journeyId: string;
+  name: string;
+  description?: string;
+  status: string;
+  odaComponentType?: string;
+  overallProgress?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type JourneyListResponse = {
+  success: boolean;
+  total: number;
+  data: SimpleJourneySummary[];
+};
+
 export type ValidationResult = {
   valid: boolean;
   errors: Array<{ path: string; message: string }>;

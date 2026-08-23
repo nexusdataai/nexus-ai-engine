@@ -30,7 +30,9 @@ pip-log.txt
 pip-delete-this-directory.txt
 
 # Unit test / coverage reports
-htmlcov/
+tests/coverage.xml
+tests/htmlcov/
+tests/reports/
 .tox/
 .nox/
 .coverage
@@ -45,7 +47,6 @@ coverage.xml
 cover/
 
 # Per-run output from deploy/deploy-and-test.sh (BDD HTML reports etc.)
-reports/
 
 # Virtual environments
 .env
@@ -79,3 +80,6 @@ dmypy.json
 # Local env files
 .env.local
 .env.*.local
+.k3s-port-forward-ai-engine.pids
+backend/.env.local
+frontend/.env.local

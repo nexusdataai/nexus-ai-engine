@@ -24,8 +24,8 @@ Examples:
   
   # From test runner
   python tests/report_generators/generate_unit_report.py \\
-    --input test_reports/unit/unit_test_results.json \\
-    --output test_reports/unit/unit_test_report_enhanced.html
+    --input tests/reports/unit/unit_test_results.json \\
+    --output tests/reports/unit/unit_test_report_enhanced.html
         '''
     )
     

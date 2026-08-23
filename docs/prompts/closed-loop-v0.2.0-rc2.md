@@ -86,7 +86,7 @@ pytest tests/integration -q -k tool 2>/dev/null || true
 make serve
 curl -sf http://localhost:8001/api/v1/tools/ | jq .
 curl -sf -X POST http://localhost:8001/api/v1/tool-packages \
-  -H 'Content-Type: application/json' -d @examples/tool-packages/o2c/manifest.json
+  -H 'Content-Type: application/json' -d @sdk/examples/tool-packages/o2c/manifest.json
 ```
 
 **Layer 3 — UAT-mapped tests**
@@ -124,7 +124,7 @@ Run `contract-tests` todo against **staging ontology** OpenAPI.
 
 | Todo ID | Done when |
 |---------|-----------|
-| `tool-sdk` | `packages/nexus-tool-sdk` with VdlClient, ConnectorClient, ToolRuntime |
+| `tool-sdk` | `sdk/nexus-tool-sdk` with VdlClient, ConnectorClient, ToolRuntime |
 | `tool-base` | Tool base aligned with nexus-sre descriptor + `_dispatch` |
 | `tool-registry` | ToolRegistry load/list/get |
 | `publish-api` | `POST /api/v1/tool-packages` with manifest validation |

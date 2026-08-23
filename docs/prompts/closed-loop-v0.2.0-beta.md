@@ -98,7 +98,7 @@ pytest tests/integration -q -k journey 2>/dev/null || true
 ```bash
 make serve   # background :8001
 curl -sf -X POST http://localhost:8001/api/v1/journeys/validate \
-  -H 'Content-Type: application/json' -d @examples/journeys/order-to-cash.yaml
+  -H 'Content-Type: application/json' -d @sdk/examples/journeys/order-to-cash.yaml
 curl -sf http://localhost:8001/api/v1/journeys/
 ```
 
@@ -114,7 +114,7 @@ Map tests to UAT IDs:
 - β-J6 export YAML round-trip  
 - β-J7 migrate-plugin-yaml dry-run  
 
-Prefer `pytest tests/integration/` + golden files under `examples/journeys/`; add Playwright only if UI badges are implemented.
+Prefer `pytest tests/integration/` + golden files under `sdk/examples/journeys/`; add Playwright only if UI badges are implemented.
 
 **Layer 4 — Deploy (when applicable)**
 
@@ -150,7 +150,7 @@ kubectl port-forward -n ai-engine-prod svc/nexus-ai-engine-api 8001:8000
 |---------|-----------|
 | `dsl-models` | Journey/Stage/Step models per spec 010; contract tests green |
 | `validator` | Semantic validation; `POST /journeys/validate` returns structured errors |
-| `compiler` | DSL → ExecutionGraph; golden tests for `examples/journeys/*.yaml` |
+| `compiler` | DSL → ExecutionGraph; golden tests for `sdk/examples/journeys/*.yaml` |
 | `journey-service` | Versioned CRUD; published versions immutable |
 | `journeys-api` | REST CRUD per spec 060 |
 | `migrate-script` | `scripts/migrate-plugin-yaml.py --dry-run` succeeds on sample |

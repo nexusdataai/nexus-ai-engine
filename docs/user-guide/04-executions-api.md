@@ -19,7 +19,7 @@ Import a DSL journey first (Ch.3):
 ```bash
 curl -s -X POST http://localhost:8001/api/v1/journeys/import \
   -H 'Content-Type: application/yaml' \
-  --data-binary @examples/journeys/order-to-cash.yaml | jq .metadata.id
+  --data-binary @sdk/examples/journeys/order-to-cash.yaml | jq .metadata.id
 ```
 
 ---

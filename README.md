@@ -42,47 +42,168 @@ pip install "nexus-ai-engine[harness]"  # everything above + behave + pytest-ben
 pip install "nexus-ai-engine[test,dev]" # full test + dev toolchain
 ```
 
-## Package layout
+## Layout
 
 ```
-src/nexus_ai_engine/
+nexus-ai-engine/
+├── backend/          # Python library + FastAPI reference server
+├── frontend/         # Journey Studio React SPA (Vite)
+├── deploy/k8s/       # Kubernetes manifests
+├── docs/             # Specs, user guide, dev plans
+├── scripts/          # K3s local dev helpers (port-forward, verify, legacy-deploy)
+├── tests/            # Unit, integration, e2e, BDD
+├── sdk/              # Tool SDK packages + sample journeys
+├── VERSION           # Repo-level semver
+└── Makefile          # Dev + deploy shortcuts
+```
+
+Core modules under `backend/src/nexus_ai_engine/`:
+
+```
   config.py          # EngineConfig dataclass
   factory.py         # build_engine(config)
-  errors.py          # EngineError + subclasses
-  contracts/         # Protocol ports (repositories, sinks, events, scheduler, stage factory)
-  models/            # Pydantic domain models (journey, prompt, logs/reports)
-  stages/            # BaseStage, stage registry, PluginJourneyStage
-  execution/         # TransformationJobExecutor, AsyncioJobScheduler
-  services/          # JourneyService, PromptsService, LogsAndReportsService
-  events/            # SSEManager / EventSink implementations
-  adapters/          # DynamoDB, S3, in-memory shipped adapters
-  server/            # Reference FastAPI app + routers + MCP + CLI
-  testing/           # make_test_app, JourneyYAMLRunner, pytest fixtures plugin
+  contracts/         # Protocol ports, Pydantic models
+  journeys/          # DSL validator, compiler, store
+  executor/          # ExecutionManager, FSM, tool dispatcher
+  adapters/          # DynamoDB, S3, in-memory
+  server/            # Reference FastAPI app + MCP + CLI
+  testing/           # Importable test harness
 ```
 
-## Quickstart — local reference server
+## Local development (simple)
+
+In-memory engine — no AWS, no K3s:
 
 ```bash
 make install-venv
 source .venv/bin/activate
-make serve                              # http://localhost:8001/health
+make serve                              # http://localhost:8000/health
 ```
 
-Or via Docker:
+Or via Docker (legacy local image build):
 
 ```bash
 make docker-build && make docker-run    # http://localhost:8000/health
 ```
 
-Or docker-compose:
+## K3s-backed local dev (recommended)
+
+Run backend and frontend on the host with hot reload, connected to the K3s local stack (Scylla/MiniStack/MinIO + operator-managed resources). No Docker image rebuild for app code changes — same model as `nexus-ontology`.
+
+### Prerequisites
+
+1. K3s cluster and local AWS stack (from `nexus-deployer`):
 
 ```bash
-make compose-up
+cd ../nexus-deployer/aws-login && ./set-context.sh 6
+cd ../kube-operator
+./operator.sh deploy
+./deploy-local-aws-stack.sh --kube-context local-cluster
+./verify-local-stack.sh --kube-context local-cluster
+../local-k3s/verify-local-boto3-apis.sh --kube-context local-cluster
 ```
+
+2. Register the `ai-engine-local` namespace (operator or raw manifest):
+
+```bash
+# Required — use local K3s kubeconfig (not default ~/.kube EKS contexts)
+source ../aws-login/.active-env
+# Or: export KUBECONFIG=/path/to/nexus-deployer/aws-login/.kube/config
+
+# Option A — operator product (registers namespace via NexusCapability CR)
+./deploy-capability.sh --product local-ai-engine --env local
+
+# Option B — apply deps manifest directly
+kubectl --context local-cluster apply -f examples/nexus-ai-engine-local-dev-deps.yaml
+```
+
+If you see `the server has asked for the client to provide credentials`, kubectl is pointed at EKS instead of local K3s — run `source ../aws-login/.active-env` or `./set-context.sh 6` first.
+
+3. Seed local DynamoDB tables and S3 buckets for ai-engine:
+
+```bash
+cd ../../nexus-ai-engine
+make init-k3s-local-aws    # creates ai-engine-local-{journeys,executions,prompts} + buckets
+```
+
+Demo journeys are **not** stored in Scylla automatically. With K3s local dev the backend uses DynamoDB (`ai-engine-local-journeys`), which starts empty. On first startup the API seeds the 5 bundled demo journeys when `ENVIRONMENT=local` (disable with `SEED_DEMO_JOURNEYS=false`). To re-seed manually:
+
+```bash
+make seed-k3s-dev-journeys
+# or: ./scripts/seed-sample-journeys.sh --base http://127.0.0.1:8000
+```
+
+### Daily workflow
+
+```bash
+# Terminal 1 — port-forwards (auto-started by make dev-backend if missing)
+make port-forward-k3s      # or: make ensure-k3s-dev
+
+# Terminal 2 — backend
+cp backend/.env.local.k3s.example backend/.env.local   # once
+make dev-backend           # uses .venv + unsets AWS_PROFILE
+
+# Terminal 3 — frontend (start backend first)
+cp frontend/.env.local.k3s.example frontend/.env.local   # once
+make dev-frontend
+```
+
+| Service | Host endpoint |
+|---------|---------------|
+| Backend API | http://localhost:8000 |
+| Frontend UI | http://localhost:8080 |
+| DynamoDB (Scylla) | http://127.0.0.1:8001 |
+| Athena/Glue (MiniStack) | http://127.0.0.1:4566 |
+| S3 (MinIO) | http://127.0.0.1:9000 |
+
+Verify:
+
+```bash
+make verify-k3s-dev
+curl -sf http://127.0.0.1:8000/health
+curl -sf http://127.0.0.1:8000/api/v1/journeys/ | head -c 200
+```
+
+Stop port-forwards: `make stop-port-forward-k3s`
+
+**Important:** Do not reuse a prod-oriented `backend/.env.local` for K3s dev — use `backend/.env.local.k3s.example` (`CAPABILITY_NAME=ai-engine`, `ENVIRONMENT=local`). **Do not set `AWS_PROFILE=local`** when running the host backend; the Makefile unsets it and uses `minioadmin` keys from `.env.local`.
+
+**Resource naming:** DynamoDB tables and S3 buckets follow `{capability}-{environment}-{purpose}` locally (e.g. `ai-engine-local-journeys`). Remote AWS uses legacy names via SSM (e.g. `ai-engine-journeys-dev`). Set only `CAPABILITY_NAME` and `ENVIRONMENT` — do not hardcode table names unless overriding a single resource.
+
+Port-forward PID file: `.k3s-port-forward-ai-engine.pids` (separate from ontology’s PID file).
+
+## Deploy (kube-operator)
+
+```bash
+cd ../nexus-deployer/kube-operator
+./bump-version.sh ai-engine-all patch --ai-engine-dir ../../nexus-ai-engine
+./package-images.sh --only-ai-engine-images --ai-engine-dir ../../nexus-ai-engine
+./create-ecr-images.sh --only-ai-engine-images
+./app-rollout.sh --capability ai-engine --env dev --version <tag> ai-engine-all
+```
+
+Or from this repo:
+
+```bash
+make deploy-dev
+```
+
+## Images
+
+| Component | ECR repository | K8s deployment |
+|-----------|----------------|----------------|
+| API | `nexus-ai-engine-api` | `nexus-ai-engine` |
+| UI | `nexus-ai-engine-ui` | `nexus-ai-engine-ui` |
+
+Namespace: `ai-engine-{env}` (e.g. `ai-engine-dev`, `ai-engine-prod`; prod uses `ai-engine`).
+
+Legacy standalone EKS deploy (IAM, CloudFormation, `deploy-and-test.sh`): [scripts/legacy-deploy/README.md](scripts/legacy-deploy/README.md).
+
+---
 
 Health/readiness/version plus the journey/job/logs/reports/prompts/schedules
 routes are all live against an in-memory engine, so the reference server is
-exercisable end-to-end today. See [docs/ROUTE_PARITY.md](docs/ROUTE_PARITY.md)
+exercisable end-to-end today. See [docs/spec/ROUTE_PARITY.md](docs/spec/ROUTE_PARITY.md)
 for the canonical surface; handlers will swap their backing repository to
 DynamoDB in phase 10 without changing the router contract.
 
@@ -115,7 +236,7 @@ What you can do:
 - Edit the **prompts catalog** with a version-history audit log and a
   one-click reset to defaults.
 
-See [docs/UI.md](docs/UI.md) for the architecture, component tree, and how
+See [docs/spec/UI.md](docs/spec/UI.md) for the architecture, component tree, and how
 to add pages or API routes.
 
 ## Integration guidelines
@@ -303,7 +424,7 @@ CI and against staging for smoke checks.
 
 ### Configuration contract
 
-All configuration flows through `EngineConfig` ([src/nexus_ai_engine/config.py](src/nexus_ai_engine/config.py)).
+All configuration flows through `EngineConfig` ([backend/src/nexus_ai_engine/config.py](backend/src/nexus_ai_engine/config.py)).
 The library never reads environment variables itself; consumers build the
 dataclass from whichever source they prefer (env, SSM, Secrets Manager,
 Kubernetes ConfigMap, app config file).
@@ -326,7 +447,7 @@ server starts cleanly with zero AWS configuration today (routes 501).
 
 ### Choose your storage adapters
 
-The shipped adapters live under `src/nexus_ai_engine/adapters/` and are
+The shipped adapters live under `backend/src/nexus_ai_engine/adapters/` and are
 selected via `build_engine(...)` overrides (lands in phase 3):
 
 - **DynamoDB + S3 (default).** Enable `[aws]` extra; pass real table/bucket
@@ -407,362 +528,9 @@ Tiered test directories:
 - `tests/endurance/`   concurrent load smoke (heavy scenarios opt-in)
 - `tests/journeys/`    plugin-journey YAMLs exercised end-to-end
 
-## Deploy to Kubernetes with the UI
+## Legacy EKS deploy
 
-End-to-end playbook for deploying `nexus-ai-engine` as an independent pod
-in an EKS cluster and opening the embedded Journey Studio UI in your
-browser via `kubectl port-forward`.
-
-### Architecture after deploy
-
-```mermaid
-flowchart LR
-  browser["Your laptop<br/>browser"] -->|kubectl port-forward<br/>8000:8000| svc
-  subgraph cluster [EKS cluster]
-    subgraph ns [namespace: ai-engine]
-      svc["Service<br/>nexus-ai-engine"] --> pod["Pod<br/>nexus-ai-engine<br/>(2 replicas)"]
-      sa["ServiceAccount<br/>ai-engine-role-sa<br/>(IRSA)"] -.-> pod
-      cm["ConfigMap<br/>nexus-ai-engine-config"] -.-> pod
-    end
-  end
-  pod -->|IRSA assume| iam["IAM role<br/>ai-engine-role"]
-  pod -->|via VPC endpoints| aws["AWS services<br/>DynamoDB, S3, Secrets, ..."]
-```
-
-### Prerequisites
-
-1. AWS account with admin access (for the one-time IAM + VPC setup).
-2. EKS cluster with the OIDC provider registered in IAM.
-3. Local tooling: `aws`, `kubectl`, `docker`, `git`. The repo is cloned
-   side-by-side with [`nexus-backend`](https://github.com/nexusdataai/nexus-backend)
-   so the deploy scripts can read its `.env.local`:
-
-   ```
-   /opt/mycode/nexus/
-   ├── nexus-ai-engine/   ← this repo
-   └── nexus-backend/     ← .env.local lives here
-   ```
-
-The deploy scripts in this repo pick up `AWS_PROFILE` / `AWS_REGION` from
-`nexus-backend/.env.local` automatically; override with `--profile` /
-`--region` flags when needed.
-
-### Step 1 — Log in and set your kubectl context
-
-From `nexus-backend/`:
-
-```bash
-cd /opt/mycode/nexus/nexus-backend
-
-./aws-login.sh                       # ADFS login
-# or
-./aws-sso-login.sh                   # SSO login
-
-./aws-eks-context.sh                 # lists clusters, lets you pick one,
-                                     # runs `aws eks update-kubeconfig`
-                                     # and pins a namespace for you
-```
-
-Verify:
-
-```bash
-kubectl config current-context       # should show your cluster
-aws sts get-caller-identity          # should return the assumed role
-```
-
-### Step 2 — Admin: create the IAM role and VPC endpoints (one-time)
-
-An AWS admin runs this once per cluster. It creates:
-
-- IAM role `ai-engine-role` with inline policy `ai-engine-policy`
-  (DynamoDB, S3, SSM, Secrets, Glue, Athena, Cognito, Logs, STS, ECR
-  pull — all scoped to `ai-engine-*` resources).
-- Trust policy locked to `system:serviceaccount:ai-engine:ai-engine-role-sa`.
-- 14 region-templated VPC endpoints so the pod can reach AWS privately.
-
-```bash
-cd /opt/mycode/nexus/nexus-ai-engine
-
-./deploy/admin/setup-admin-role.sh --region ap-southeast-1           # both IAM + VPC
-./deploy/admin/setup-admin-role.sh --region ap-southeast-1 --iam-only   # just IAM
-./deploy/admin/setup-admin-role.sh --region ap-southeast-1 --dry-run    # preview
-```
-
-Auto-detects `ACCOUNT_ID`, OIDC provider, VPC, subnets, and the cluster
-security group from your kubectl context. Overridable with
-`--cluster`, `--account-id`, `--oidc-provider`, `--vpc-id`,
-`--subnet-ids`, `--sg-id`, `--route-table-ids`.
-
-Verify:
-
-```bash
-aws iam get-role --role-name ai-engine-role \
-    --query "Role.Arn" --output text
-
-aws ec2 describe-vpc-endpoints \
-    --filters "Name=tag:Project,Values=nexus-ai-engine" \
-    --query "VpcEndpoints[].{Svc:ServiceName,State:State}" --output table
-```
-
-Full admin checklist: [deploy/iam/README.md](deploy/iam/README.md) ·
-VPC endpoint inventory: [deploy/iam/vpc-endpoints.md](deploy/iam/vpc-endpoints.md).
-
-### Step 3 — Deploy the pod
-
-#### Option A — one command (recommended)
-
-```bash
-./deploy/deploy-and-test.sh --env dev --region ap-southeast-1
-```
-
-This script does everything end-to-end:
-
-1. Provisions the DynamoDB table `ai-engine-journeys-dev` and the S3
-   buckets `ai-engine-journeys-logs-dev` and `ai-engine-journeys-reports-dev`
-   (idempotent — skipped if they exist).
-2. Builds the Docker image with `--build-arg INCLUDE_TEST_DEPS=true` so
-   you can run the full test suite inside the pod.
-3. Creates the ECR repository `nexus-ai-engine` if missing, logs in, and
-   pushes the image tagged `<git-sha>-test` + `latest-test`.
-4. Applies `deploy/k8s/*.yaml` into namespace `ai-engine`, substituting
-   `${ENV}`, `${REGION}`, `${ECR_REGISTRY}`, and the IRSA role ARN at
-   apply time so the committed YAML stays generic.
-5. Waits for the rollout (`kubectl rollout status deploy/nexus-ai-engine`).
-6. Runs every test tier inside the pod via `kubectl exec ... make test-<tier>`
-   and prints a pass/fail summary. Pulls the BDD HTML report off the pod
-   into `./reports/bdd-dev.html`.
-
-Common flag combinations:
-
-```bash
-# Just deploy; skip tests
-./deploy/deploy-and-test.sh --env dev --skip-tests
-
-# Redeploy with the already-built image
-./deploy/deploy-and-test.sh --env dev --skip-build --skip-push
-
-# Run only a few tiers in-pod
-./deploy/deploy-and-test.sh --env dev --tests unit,e2e
-
-# Preview, no changes
-./deploy/deploy-and-test.sh --env dev --dry-run
-
-# Tear down K8s resources after tests
-./deploy/deploy-and-test.sh --env dev --cleanup
-
-# Also delete the DDB table and S3 buckets (prompts to type DELETE-<env>)
-./deploy/deploy-and-test.sh --env dev --cleanup-aws
-```
-
-#### Option B — manual (for understanding or CI debugging)
-
-```bash
-# 1. Provision DDB + S3
-aws dynamodb create-table --table-name ai-engine-journeys-dev ...   # see deploy-and-test.sh for exact schema
-
-aws s3api create-bucket --bucket ai-engine-journeys-logs-dev --region ap-southeast-1 \
-    --create-bucket-configuration LocationConstraint=ap-southeast-1
-aws s3api create-bucket --bucket ai-engine-journeys-reports-dev --region ap-southeast-1 \
-    --create-bucket-configuration LocationConstraint=ap-southeast-1
-
-# 2. Build + push
-make docker-build
-ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-REG="${ACCOUNT}.dkr.ecr.ap-southeast-1.amazonaws.com"
-aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS --password-stdin "$REG"
-docker tag nexus-ai-engine:local "${REG}/nexus-ai-engine:latest-test"
-docker push "${REG}/nexus-ai-engine:latest-test"
-
-# 3. Apply manifests (sed-substitute placeholders)
-mkdir -p /tmp/ai-k8s && cp deploy/k8s/*.yaml /tmp/ai-k8s/
-sed -i "s|\${ENV}|dev|g; \
-        s|\${REGION}|ap-southeast-1|g; \
-        s|REPLACE_WITH_ECR_REGISTRY|${REG}|g; \
-        s|REPLACE_WITH_IAM_ROLE_ARN|arn:aws:iam::${ACCOUNT}:role/ai-engine-role|g" \
-    /tmp/ai-k8s/*.yaml
-kubectl apply -k /tmp/ai-k8s/
-kubectl -n ai-engine rollout status deploy/nexus-ai-engine --timeout=180s
-```
-
-#### Option C — GitHub Actions
-
-[`.github/workflows/deploy-eks.yml`](.github/workflows/deploy-eks.yml) wraps
-`deploy-and-test.sh`. Trigger it manually from the Actions tab with inputs
-for environment, cluster, image tag, and test tiers. Reuses
-`AWS_ROLE_TO_ASSUME_DEV` from the nexus-backend workflow so no new
-secrets are required.
-
-### Step 4 — Open the UI in your browser
-
-If you're running `kubectl` on the **same machine as your browser** (laptop
-desktop, for example):
-
-```bash
-kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000
-# Forwarding from 127.0.0.1:8000 -> 8000
-```
-
-Now open `http://localhost:8000/ui` in your browser.
-
-If you're running `kubectl` on a **remote jumpbox / EC2 / dev server** and
-want to browse from your laptop, `kubectl port-forward` binds to the
-loopback interface only by default, so `<host-ip>:8000` won't be
-reachable. Pick one of:
-
-```bash
-# A) SSH tunnel from your laptop (most secure — no external bind):
-ssh -L 8000:localhost:8000 <user>@<jumpbox>
-# Then on the jumpbox:
-kubectl -n ai-engine port-forward svc/nexus-ai-engine 8000:8000
-# On your laptop: open http://localhost:8000/ui
-
-# B) VS Code / Cursor remote — add port 8000 in the Ports panel;
-#    your IDE tunnels it to localhost automatically.
-
-# C) Bind the port-forward to all interfaces on the jumpbox
-#    (reachable from anyone who can reach the jumpbox on :8000):
-kubectl -n ai-engine port-forward --address 0.0.0.0 \
-        svc/nexus-ai-engine 8000:8000
-# Forwarding from 0.0.0.0:8000 -> 8000
-# Then on your laptop: open http://<jumpbox-ip>:8000/ui
-```
-
-Security note on option C: the UI + API have no auth. Only use `--address
-0.0.0.0` on a host whose security group / firewall limits inbound on
-port 8000 to trusted source IPs.
-
-You land on the **Journeys** page. Two cases depending on which engine
-the pod booted with:
-
-- **InMemoryEngine** (no `DYNAMODB_TRANSFORMATION_TABLE` set / no SSM
-  prefix configured) — 5 demo journeys are pre-seeded into in-process
-  state and visible immediately. They run via the random-tick simulator.
-- **Production Engine** (DynamoDB-backed, the standard EKS deploy) —
-  the table starts **empty**. The pod registers the bundled demo stages
-  at startup (default ON via `REGISTER_DEMO_STAGES=true` in the
-  ConfigMap), but you need to seed matching journey definitions:
-
-  ```bash
-  POD=$(kubectl -n ai-engine get pod -l app.kubernetes.io/name=nexus-ai-engine \
-        -o jsonpath='{.items[0].metadata.name}')
-  kubectl -n ai-engine cp scripts/seed-sample-journeys.sh "$POD":/tmp/seed.sh
-  kubectl -n ai-engine exec "$POD" -- bash /tmp/seed.sh
-  ```
-
-  Five journeys appear after re-loading the UI:
-
-  | Journey                       | ODA component type      | Stages |
-  |-------------------------------|-------------------------|--------|
-  | Order-to-Cash Monitor         | `order-management`      | 1      |
-  | Call Processing Pipeline      | `service-management`    | 3      |
-  | Demand Forecasting Engine     | `inventory-management`  | 1      |
-  | Inventory Optimization        | `inventory-management`  | 1      |
-  | Supply Chain Risk             | `resource-management`   | 1      |
-
-Click a card to open the **Journey Studio**, click **Start Processing**
-on any stage, and watch the live SSE log stream tick through synthetic
-steps. Each step does a bounded random sleep + emits a realistic-looking
-log line per tick — same `BaseStage` → DynamoDB-LIVELOG → S3 → SSE path
-real production stages use, so this is a faithful framework
-performance / smoke test. See [docs/UI.md](docs/UI.md) for the full
-feature list.
-
-The bundled demo stages are opt-in via `--register-demo-stages` /
-`REGISTER_DEMO_STAGES`. Disable them once a host application registers
-real domain stages so the synthetic ones don't shadow real `order_to_cash`
-implementations. See
-[`deploy/k8s/README.md`](deploy/k8s/README.md#bundled-demo-stages-default-on)
-for the toggles.
-
-### Step 5 — Smoke-test the running pod
-
-```bash
-# HTTP probes
-curl -fsS http://localhost:8000/health                  # {"status":"ok", "version":"0.1.0a1"}
-curl -fsS http://localhost:8000/readiness               # {"ready":true,...}
-curl -fsS http://localhost:8000/api/v1/journeys/ | jq 'length'   # 5
-
-# Run the test suite inside the pod
-POD=$(kubectl -n ai-engine get pod -l app.kubernetes.io/name=nexus-ai-engine \
-      -o jsonpath='{.items[0].metadata.name}')
-
-kubectl -n ai-engine exec -it "$POD" -- make test-unit
-kubectl -n ai-engine exec -it "$POD" -- make test-e2e
-kubectl -n ai-engine exec -it "$POD" -- make test-journeys
-```
-
-### What gets provisioned
-
-After `deploy-and-test.sh --env dev` completes:
-
-| Resource                                    | Created by            |
-|---------------------------------------------|-----------------------|
-| IAM role `ai-engine-role`                   | admin (step 2)        |
-| VPC endpoints × 14                          | admin (step 2)        |
-| ECR repo `nexus-ai-engine`                  | deploy-and-test.sh    |
-| DynamoDB table `ai-engine-journeys-dev`     | deploy-and-test.sh    |
-| S3 bucket `ai-engine-journeys-logs-dev`     | deploy-and-test.sh    |
-| S3 bucket `ai-engine-journeys-reports-dev`  | deploy-and-test.sh    |
-| K8s namespace `ai-engine`                   | deploy-and-test.sh    |
-| ServiceAccount `ai-engine-role-sa` (with IRSA annotation) | deploy-and-test.sh |
-| Deployment `nexus-ai-engine` (2 replicas)   | deploy-and-test.sh    |
-| Service `nexus-ai-engine` (ClusterIP :8000) | deploy-and-test.sh    |
-| HPA (2 → 10 replicas)                       | deploy-and-test.sh    |
-| NetworkPolicy (deny-all ingress + allow kube-system) | deploy-and-test.sh |
-| ConfigMap `nexus-ai-engine-config`          | deploy-and-test.sh    |
-
-### Tear down
-
-```bash
-# K8s only (keeps DDB + S3 data)
-./deploy/deploy-and-test.sh --env dev --cleanup --skip-tests
-
-# K8s + AWS data (prompts to type DELETE-dev to confirm)
-./deploy/deploy-and-test.sh --env dev --cleanup --cleanup-aws --skip-tests
-
-# Admin-side (IAM + VPC endpoints — usually kept per cluster)
-./deploy/admin/setup-admin-role.sh --region ap-southeast-1 --cleanup
-```
-
-### Troubleshooting
-
-- **`503 Service Unavailable` on any API call** — `build_engine()` hasn't
-  been called. Re-run `deploy-and-test.sh` or check the pod logs with
-  `kubectl -n ai-engine logs deploy/nexus-ai-engine --tail=100`.
-- **IRSA 403 `AccessDenied` in pod logs** — the admin step 2 was skipped
-  or the ServiceAccount lacks the role-arn annotation. Verify:
-
-  ```bash
-  kubectl -n ai-engine get sa ai-engine-role-sa -o yaml | grep role-arn
-  ```
-
-  If missing, re-run the deploy (the script re-applies the annotation).
-
-- **UI loads but API calls fail** — confirm the pod is actually running:
-
-  ```bash
-  kubectl -n ai-engine get pods -l app.kubernetes.io/name=nexus-ai-engine
-  kubectl -n ai-engine describe pod <pod-name>
-  ```
-
-- **`/ui` returns 500: "UI assets not found"** — the image was built
-  without the UI static files. Rebuild with
-  `make docker-build` + push, or check that the wheel installed into the
-  image contains `src/nexus_ai_engine/server/static/ui/*` (see
-  `pyproject.toml` `[tool.hatch.build.targets.wheel].include`).
-
-- **SSE live logs don't stream in the UI** — port-forward breaks
-  long-lived HTTP connections on idle. Keep the port-forward running in
-  a terminal and don't let it time out; re-run on failure.
-
-- **"AWS credentials are missing or expired" from the deploy scripts** —
-  run `./aws-login.sh` (or `./aws-sso-login.sh`) in `nexus-backend/`
-  first. The deploy scripts read `AWS_PROFILE` from
-  `nexus-backend/.env.local`; pass `--profile <name>` to override.
-
-- **Port-forward ends with "error: lost connection to pod"** — the
-  pod was rescheduled (e.g. after a `make docker-build && kubectl apply`).
-  Re-run the port-forward command.
+Standalone manifests under `deploy/k8s/` plus IAM/CloudFormation scripts live under `scripts/legacy-deploy/`. See [scripts/legacy-deploy/README.md](scripts/legacy-deploy/README.md) for the full playbook (admin IAM setup, `deploy-and-test.sh`, port-forward, in-pod tests, tear-down).
 
 ## Development
 

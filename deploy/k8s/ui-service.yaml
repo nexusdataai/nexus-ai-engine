@@ -3,9 +3,7 @@ kind: Service
 metadata:
   name: nexus-ai-engine-ui
   labels:
-    app: nexus-ai-engine-ui
     app.kubernetes.io/name: nexus-ai-engine-ui
-    app.kubernetes.io/component: ui
 spec:
   type: ClusterIP
   selector:
@@ -14,3 +12,4 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+      protocol: TCP

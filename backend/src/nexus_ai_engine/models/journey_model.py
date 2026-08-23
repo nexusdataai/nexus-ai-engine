@@ -461,10 +461,13 @@ def convert_to_journey_data(data: Union[Dict[str, Any], JourneyData]) -> Dict[st
 
 
 def convert_to_stage_data(data: Union[Dict[str, Any], StageData]) -> Dict[str, Any]:
-    """Convert StageData model or dict to dict"""
+    """Convert StageData model or dict to dict."""
     if isinstance(data, StageData):
         return data.model_dump(exclude_none=True)
-    return data
+    result = dict(data)
+    if "stageId" not in result and "stage_id" in result:
+        result["stageId"] = result["stage_id"]
+    return result
 
 
 def convert_to_rule_data(data: Union[Dict[str, Any], RuleData]) -> Dict[str, Any]:

@@ -13,6 +13,7 @@ from uuid import UUID
 import boto3
 from botocore.exceptions import ClientError
 
+from nexus_ai_engine.adapters.dynamodb.gsi_compat import is_gsi_key_mismatch
 from nexus_ai_engine.config import get_config
 from nexus_ai_engine.contracts.execution_graph import ExecutionGraph
 from nexus_ai_engine.contracts.execution_state import ExecutionState
@@ -325,15 +326,34 @@ class DynamoDBExecutionRepository:
                 "KeyConditionExpression": "journey_id = :jid",
                 "ExpressionAttributeValues": {":jid": journey_id},
             }
-            while len(items) < limit:
-                resp = self._table.query(**kwargs)
-                items.extend(resp.get("Items", []))
-                if "LastEvaluatedKey" not in resp:
-                    break
-                kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-            return items[:limit]
+            try:
+                while len(items) < limit:
+                    resp = self._table.query(**kwargs)
+                    items.extend(resp.get("Items", []))
+                    if "LastEvaluatedKey" not in resp:
+                        break
+                    kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+                return items[:limit]
+            except Exception as exc:
+                if not is_gsi_key_mismatch(exc):
+                    raise
+                return self._scan_by_journey(journey_id, limit=limit)
 
         return await self._run(_query)
+
+    def _scan_by_journey(self, journey_id: str, *, limit: int) -> list[dict]:
+        items: list[dict] = []
+        scan_kwargs: dict[str, Any] = {
+            "FilterExpression": "journey_id = :jid AND SK = :sk",
+            "ExpressionAttributeValues": {":jid": journey_id, ":sk": "STATE#current"},
+        }
+        while len(items) < limit:
+            resp = self._table.scan(**scan_kwargs)
+            items.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        return items[:limit]
 
     async def _query_by_tenant(self, tenant_id: str, *, limit: int) -> list[dict]:
         def _query():
@@ -343,15 +363,34 @@ class DynamoDBExecutionRepository:
                 "KeyConditionExpression": "tenant_id = :tid",
                 "ExpressionAttributeValues": {":tid": tenant_id},
             }
-            while len(items) < limit:
-                resp = self._table.query(**kwargs)
-                items.extend(resp.get("Items", []))
-                if "LastEvaluatedKey" not in resp:
-                    break
-                kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
-            return items[:limit]
+            try:
+                while len(items) < limit:
+                    resp = self._table.query(**kwargs)
+                    items.extend(resp.get("Items", []))
+                    if "LastEvaluatedKey" not in resp:
+                        break
+                    kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+                return items[:limit]
+            except Exception as exc:
+                if not is_gsi_key_mismatch(exc):
+                    raise
+                return self._scan_by_tenant(tenant_id, limit=limit)
 
         return await self._run(_query)
+
+    def _scan_by_tenant(self, tenant_id: str, *, limit: int) -> list[dict]:
+        items: list[dict] = []
+        scan_kwargs: dict[str, Any] = {
+            "FilterExpression": "tenant_id = :tid AND SK = :sk",
+            "ExpressionAttributeValues": {":tid": tenant_id, ":sk": "STATE#current"},
+        }
+        while len(items) < limit:
+            resp = self._table.scan(**scan_kwargs)
+            items.extend(resp.get("Items", []))
+            if "LastEvaluatedKey" not in resp:
+                break
+            scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        return items[:limit]
 
     async def _scan_states(self, *, limit: int) -> list[dict]:
         def _scan():

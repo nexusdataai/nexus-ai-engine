@@ -2,6 +2,7 @@
 
 import type {
   DslJourneySummary,
+  JourneyListResponse,
   ExecutionGraph,
   ExecutionNodeState,
   ExecutionSummary,
@@ -84,6 +85,9 @@ export const api = {
     }),
 
   listDslJourneys: () => apiFetch<DslJourneySummary[]>("/api/v1/journeys/dsl"),
+
+  listSimpleJourneys: () =>
+    apiFetch<JourneyListResponse>("/api/v1/journeys/").then((r) => r.data),
 
   exportJourney: (id: string, version?: number) =>
     apiFetch<{ journey_id: string; yaml: string }>(`/api/v1/journeys/${id}/export`, {

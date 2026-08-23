@@ -21,9 +21,9 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 10001
-        runAsGroup: 10001
-        fsGroup: 10001
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
       containers:
         - name: ui
           image: REPLACE_WITH_ECR_REGISTRY/nexus-ai-engine-ui:latest
@@ -46,18 +46,26 @@ spec:
           resources:
             requests:
               cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "200m"
               memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: run
+              mountPath: /var/run
       volumes:
         - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+        - name: run
           emptyDir: {}

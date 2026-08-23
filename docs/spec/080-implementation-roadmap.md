@@ -54,7 +54,7 @@ Phase 10 ─► nexus-backend decoupling + production hardening
 
 - [x] `docs/` specification set (this directory)
 - [ ] Pydantic contracts in `backend/src/nexus_ai_engine/contracts/`
-- [ ] JSON Schema export (`schemas/journey-dsl-v1.json`)
+- [ ] JSON Schema export (`backend/schemas/journey-dsl-v1.json`)
 - [ ] ADR: AI Engine vs nexus-sre Executor boundaries
 
 **Exit criteria:** Spec review signed off by platform team.
@@ -89,7 +89,7 @@ Phase 10 ─► nexus-backend decoupling + production hardening
 | Migrate plugin YAML | `scripts/migrate-plugin-yaml.py` |
 | Tests | Golden compile tests for 5 sample journeys |
 
-**Exit criteria:** All `examples/journeys/*.yaml` compile to valid ExecutionGraph.
+**Exit criteria:** All `sdk/examples/journeys/*.yaml` compile to valid ExecutionGraph.
 
 ---
 

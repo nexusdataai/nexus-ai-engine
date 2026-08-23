@@ -20,7 +20,7 @@ Tools never import ontology Python modules. All data access is HTTP with tenant 
 
 ## 1. Author a tool package
 
-Tool packages live under `packages/` (e.g. `packages/tools-o2c`). Each tool extends `nexus_ai_engine.tools.base.tool.Tool` and implements `_dispatch(request, runtime)` using `runtime.vdl` and `runtime.connectors`.
+Tool packages live under `packages/` (e.g. `sdk/tools-o2c`). Each tool extends `nexus_ai_engine.tools.base.tool.Tool` and implements `_dispatch(request, runtime)` using `runtime.vdl` and `runtime.connectors`.
 
 Example: O2C three-way match (`o2c_tools.match.O2cMatchOrderDeliveryInvoiceTool`) queries `Opportunity`, `Opportunity_Line_Item`, `Delivery_Document`, and `AR_Invoice` via VDL, then computes match status locally.
 
@@ -28,7 +28,7 @@ Example: O2C three-way match (`o2c_tools.match.O2cMatchOrderDeliveryInvoiceTool`
 
 ## 2. Package manifest
 
-Every publish requires a manifest (`examples/tool-packages/o2c/manifest.json`):
+Every publish requires a manifest (`sdk/examples/tool-packages/o2c/manifest.json`):
 
 ```json
 {
@@ -58,7 +58,7 @@ Every publish requires a manifest (`examples/tool-packages/o2c/manifest.json`):
 }
 ```
 
-The `module` field must be importable in the engine worker environment (`pip install -e packages/tools-o2c`).
+The `module` field must be importable in the engine worker environment (`pip install -e sdk/tools-o2c`).
 
 ---
 
@@ -67,7 +67,7 @@ The `module` field must be importable in the engine worker environment (`pip ins
 ```bash
 curl -sf -X POST http://localhost:8001/api/v1/tool-packages \
   -H 'Content-Type: application/json' \
-  -d @examples/tool-packages/o2c/manifest.json
+  -d @sdk/examples/tool-packages/o2c/manifest.json
 ```
 
 Expected: `201 Created` with `tools_registered: 1`.
@@ -141,7 +141,7 @@ After publishing tools, enable strict validation so unknown `step.tool` values f
 ```bash
 curl -sf -X POST 'http://localhost:8001/api/v1/journeys/validate?strict_tools=true' \
   -H 'Content-Type: application/json' \
-  -d @examples/journeys/order-to-cash.yaml
+  -d @sdk/examples/journeys/order-to-cash.yaml
 ```
 
 Compile with strict gate:
@@ -183,8 +183,8 @@ make serve   # port 8001
 
 Install order in `Makefile`:
 
-1. `packages/nexus-tool-sdk`
-2. `packages/tools-o2c`
+1. `sdk/nexus-tool-sdk`
+2. `sdk/tools-o2c`
 3. `nexus-ai-engine` with server extras
 
 Run rc2 test suite:

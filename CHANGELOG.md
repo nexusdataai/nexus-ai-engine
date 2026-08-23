@@ -30,9 +30,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- **nexus-tool-sdk** (`packages/nexus-tool-sdk/`) — `VdlClient`, `ConnectorClient`, `ToolRuntime`, tenant header forwarding
+- **nexus-tool-sdk** (`sdk/nexus-tool-sdk/`) — `VdlClient`, `ConnectorClient`, `ToolRuntime`, tenant header forwarding
 - **Tool base + registry** — `Tool` base class, `ToolRegistry`, package loader, `POST /api/v1/tool-packages`
-- **tools-o2c** (`packages/tools-o2c/`) — `O2cMatchOrderDeliveryInvoiceTool` via VDL HTTP (migrated from nexus-backend)
+- **tools-o2c** (`sdk/tools-o2c/`) — `O2cMatchOrderDeliveryInvoiceTool` via VDL HTTP (migrated from nexus-backend)
 - **ToolDispatcher SDK path** — registry tools dispatch through `ToolRuntime`; embedded mocks as fallback
 - **Strict tool validation** — journey validate/compile against published catalog (`strict_tools`, `strict_tool_validation`)
 - **Ontology APIs (nexus-backend)** — `POST /api/v1/vdl/query`, `batch-query`, unified connector invoke facade
@@ -43,7 +43,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - `InMemoryEngine` wires `execution_manager.dispatcher.registry` to `tool_registry`
-- `Makefile` installs `packages/tools-o2c` editable alongside `nexus-tool-sdk`
+- `Makefile` installs `sdk/tools-o2c` editable alongside `nexus-tool-sdk`
 
 ## [0.2.0-rc1] — 2026-08-02
 
@@ -80,7 +80,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Versioned journey store** (`journeys/service.py`) with published-version immutability
 - **REST API** (`server/routers/journey_dsl_api.py`): validate, import, versions, export, clone, compile
 - **Migration CLI** (`scripts/migrate-plugin-yaml.py`) for legacy plugin-journey YAML
-- **Sample DSL** `examples/journeys/order-to-cash.yaml`
+- **Sample DSL** `sdk/examples/journeys/order-to-cash.yaml`
 - **User guide** Ch.3 — Journey DSL authoring (`docs/user-guide/03-journey-dsl-authoring.md`)
 - **UAT** `docs/delivery/020-v0.2.0-beta-uat.md` — P0 6/6, P1 2/2
 

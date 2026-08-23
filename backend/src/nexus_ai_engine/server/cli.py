@@ -27,22 +27,13 @@ def _configure_logging(level: str) -> None:
 def _build_engine_config():
     """Construct an EngineConfig from environment variables.
 
-    Every field falls back to sensible defaults so `nexus-ai-engine serve`
-    works out of the box in a container with no env vars set (in-memory
-    adapters will be used once build_engine is fully implemented).
+    Table and bucket names fall back to CAPABILITY_NAME + ENVIRONMENT driven
+    resource naming when explicit DYNAMODB_* / S3_* vars are unset.
+    Host dev loads backend/.env.local via Makefile (python-dotenv), not here.
     """
-    from ..config import EngineConfig
+    from ..config import config_from_environment
 
-    return EngineConfig(
-        region=os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION"),
-        role_arn=os.environ.get("AWS_ROLE_ARN"),
-        dynamodb_transformation_table=os.environ.get("DYNAMODB_TRANSFORMATION_TABLE"),
-        dynamodb_executions_table=os.environ.get("DYNAMODB_EXECUTIONS_TABLE"),
-        dynamodb_prompts_table=os.environ.get("DYNAMODB_PROMPTS_TABLE"),
-        s3_journey_logs_bucket=os.environ.get("S3_JOURNEY_LOGS_BUCKET"),
-        s3_journey_reports_bucket=os.environ.get("S3_JOURNEY_REPORTS_BUCKET"),
-        max_concurrent_jobs=int(os.environ.get("MAX_CONCURRENT_JOBS", "10")),
-    )
+    return config_from_environment()
 
 
 # Mapping of EngineConfig field names → environment variable names used as
@@ -71,7 +62,7 @@ def _build_engine_config_from_ssm(prefix: str):
     without round-tripping through SSM.
 
     Requires ``ssm:GetParametersByPath`` on the prefix; the IAM policy at
-    ``deploy/iam/ai-engine-policy.json`` already grants this on
+    ``scripts/legacy-deploy/iam/ai-engine-policy.json`` already grants this on
     ``arn:aws:ssm:*:*:parameter/ai-engine/*``.
 
     Args:
@@ -116,7 +107,7 @@ def _build_engine_config_from_ssm(prefix: str):
         s3_journey_logs_bucket=_ssm_or_env("s3_journey_logs_bucket"),
         s3_journey_reports_bucket=_ssm_or_env("s3_journey_reports_bucket"),
         max_concurrent_jobs=int(_ssm_or_env("max_concurrent_jobs") or "10"),
-        capability_name=_ssm_or_env("capability_name") or "call-processing",
+        capability_name=_ssm_or_env("capability_name") or "ai-engine",
         environment=_ssm_or_env("environment") or "dev",
     )
 
@@ -214,7 +205,10 @@ def main(argv: list[str] | None = None) -> int:
 
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="Run the HTTP reference server")
+    serve = sub.add_parser(
+        "serve",
+        help="Run the HTTP reference server (host dev: load backend/.env.local via Makefile)",
+    )
     serve.add_argument("--http", action="store_true", default=True, help="Serve HTTP (default)")
     serve.add_argument("--host", default=os.environ.get("API_HOST", "0.0.0.0"))
     serve.add_argument("--port", type=int, default=int(os.environ.get("API_PORT", "8000")))

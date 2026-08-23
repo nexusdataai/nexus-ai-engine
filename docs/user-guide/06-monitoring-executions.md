@@ -15,7 +15,7 @@ This chapter walks through submitting a journey execution, watching live progres
 ```bash
 curl -sS -X POST http://127.0.0.1:8000/api/v1/journeys/import \
   -H 'Content-Type: application/yaml' \
-  --data-binary @examples/journeys/order-to-cash.yaml
+  --data-binary @sdk/examples/journeys/order-to-cash.yaml
 ```
 
 Note the `metadata.id` (e.g. `order-to-cash-monitor`).

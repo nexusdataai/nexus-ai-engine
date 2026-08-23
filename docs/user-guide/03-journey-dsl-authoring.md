@@ -14,7 +14,7 @@ make install-venv && source .venv/bin/activate
 make serve   # http://localhost:8001 — use another port if 8001 is taken (e.g. --port 8010)
 ```
 
-Sample DSL: `examples/journeys/order-to-cash.yaml`
+Sample DSL: `sdk/examples/journeys/order-to-cash.yaml`
 
 Spec reference: `docs/spec/010-journey-dsl.md`
 
@@ -58,7 +58,7 @@ Key rules:
 Open the full O2C sample:
 
 ```bash
-less examples/journeys/order-to-cash.yaml
+less sdk/examples/journeys/order-to-cash.yaml
 ```
 
 ---
@@ -70,7 +70,7 @@ Send the YAML to the validate endpoint. Invalid documents return structured erro
 ```bash
 curl -s -X POST http://localhost:8001/api/v1/journeys/validate \
   -H 'Content-Type: application/yaml' \
-  --data-binary @examples/journeys/order-to-cash.yaml | jq .
+  --data-binary @sdk/examples/journeys/order-to-cash.yaml | jq .
 ```
 
 Expected (valid):
@@ -98,7 +98,7 @@ curl -s -X POST http://localhost:8001/api/v1/journeys/validate \
 ```bash
 curl -s -X POST http://localhost:8001/api/v1/journeys/import \
   -H 'Content-Type: application/yaml' \
-  --data-binary @examples/journeys/order-to-cash.yaml | jq .metadata
+  --data-binary @sdk/examples/journeys/order-to-cash.yaml | jq .metadata
 ```
 
 List versions:
@@ -142,11 +142,11 @@ Convert plugin-style journeys (`name` + `stage.steps`) to DSL v1:
 
 ```bash
 python scripts/migrate-plugin-yaml.py \
-  --input examples/journeys/hello.yaml \
+  --input sdk/examples/journeys/hello.yaml \
   --dry-run
 
 python scripts/migrate-plugin-yaml.py \
-  --input examples/journeys/hello.yaml \
+  --input sdk/examples/journeys/hello.yaml \
   --output /tmp/migrated/
 ```
 

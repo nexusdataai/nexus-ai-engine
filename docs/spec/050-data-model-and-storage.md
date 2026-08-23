@@ -195,7 +195,7 @@ Large `ExecutionGraph` snapshots exceeding 400KB stored in S3 with pointer in Dy
 
 ## IAM Policy (engine role)
 
-Scoped in `deploy/iam/` (existing):
+Scoped in `scripts/legacy-deploy/iam/` (existing):
 
 - `dynamodb:*` on `ai-engine-*` tables
 - `s3:*` on `ai-engine-journey-*` buckets

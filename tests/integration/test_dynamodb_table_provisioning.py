@@ -52,7 +52,14 @@ def test_create_all_tables_active():
 
     journeys_desc = client.describe_table(TableName=names["journeys"])["Table"]
     jgsi = {g["IndexName"] for g in journeys_desc.get("GlobalSecondaryIndexes", [])}
-    assert jgsi == {"GSI1", "GSI2"}
+    assert jgsi == {"GSI1"}
+    jgsi1_keys = {
+        k["AttributeName"]
+        for g in journeys_desc["GlobalSecondaryIndexes"]
+        if g["IndexName"] == "GSI1"
+        for k in g["KeySchema"]
+    }
+    assert jgsi1_keys == {"GSI1PK", "GSI1SK"}
 
 
 @moto.mock_aws

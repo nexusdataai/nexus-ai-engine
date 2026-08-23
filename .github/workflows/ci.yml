@@ -78,7 +78,7 @@ jobs:
         run: |
           pytest tests/integration tests/contract tests/property tests/e2e tests/journeys \
             --cov=nexus_ai_engine --cov-branch \
-            --cov-report=term-missing --cov-report=html --cov-report=xml \
+            --cov-report=term-missing --cov-report=html:tests/htmlcov --cov-report=xml:tests/coverage.xml \
             --cov-fail-under=${COV_FAIL}
 
       - name: Build distribution
@@ -90,8 +90,8 @@ jobs:
         with:
           name: coverage-${{ matrix.python-version }}
           path: |
-            coverage.xml
-            htmlcov/
+            tests/coverage.xml
+            tests/htmlcov/
           retention-days: 14
 
       - name: Upload build artifacts
@@ -133,7 +133,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bdd-report
-          path: reports/bdd.html
+          path: tests/reports/bdd.html
           retention-days: 14
 
   endurance-full:

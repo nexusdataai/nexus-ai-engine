@@ -34,6 +34,14 @@ scripts/test.sh coverage
 | `tests/endurance/`   | Concurrent load smoke against the in-process engine: many-jobs-one-journey, many-jobs-many-journeys, log volume, sustained throughput, SSE fan-out, cancellation storm. | <5s default, <60s `--heavy` | `heavy` opts out |
 | `tests/journeys/`    | Exercises 10 plugin-journey YAML samples through `JourneyYAMLRunner`. | <5s | none |
 
+Generated artifacts (gitignored):
+
+| Path | Contents |
+|------|----------|
+| `tests/coverage.xml` | Branch coverage XML from `make coverage` |
+| `tests/htmlcov/` | Branch coverage HTML from `make coverage` |
+| `tests/reports/` | BDD HTML, pytest JSON/HTML tier reports from `make test-bdd` and in-pod deploy tests |
+
 ### Deterministic step tools
 
 Under `tests/fixtures/steps/` ships a small library of async step tools

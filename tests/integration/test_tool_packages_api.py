@@ -9,7 +9,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from nexus_ai_engine.testing import make_test_app
 
-MANIFEST_PATH = Path(__file__).resolve().parents[2] / "examples/tool-packages/test-mock/manifest.json"
+MANIFEST_PATH = Path(__file__).resolve().parents[2] / "sdk/examples/tool-packages/test-mock/manifest.json"
 
 
 @pytest.fixture

@@ -53,8 +53,8 @@ Audit of the embedded dev UI (`/ui`) against `docs/spec/ROUTE_PARITY.md` for the
 | Supply Chain Risk | `supply-chain-risk` | 4 | Running stage + live job |
 | Call Processing Pipeline | `call-processing` | 7 (2 stages) | Schedule every 30m |
 
-Example YAML mirrors: `examples/journeys/order-to-cash-monitor.yaml`,
-`examples/journeys/supply-chain-risk.yaml`.
+Example YAML mirrors: `sdk/examples/journeys/order-to-cash-monitor.yaml`,
+`sdk/examples/journeys/supply-chain-risk.yaml`.
 
 ## Verification
 

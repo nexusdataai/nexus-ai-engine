@@ -2,13 +2,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: nexus-ai-engine
-  namespace: ai-engine
   labels:
     app.kubernetes.io/name: nexus-ai-engine
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: nexus
 spec:
-  replicas: 2
+  replicas: 1
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -30,38 +29,12 @@ spec:
         runAsUser: 1001
         runAsGroup: 1001
         fsGroup: 1001
-      topologySpreadConstraints:
-        - maxSkew: 1
-          topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
-          labelSelector:
-            matchLabels:
-              app.kubernetes.io/name: nexus-ai-engine
       containers:
         - name: server
-          # Image reference is patched at apply time by deploy-and-test.sh.
-          # Production deploys use ${ECR_REGISTRY}/nexus-ai-engine:<tag>;
-          # in-pod test runs use ${ECR_REGISTRY}/nexus-ai-engine:<tag>-test.
-          image: REPLACE_WITH_ECR_REGISTRY/nexus-ai-engine:latest
+          image: REPLACE_WITH_ECR_REGISTRY/nexus-ai-engine-api:latest
           imagePullPolicy: IfNotPresent
-          # Override the image's default CMD so the server bootstraps its
-          # EngineConfig from SSM Parameter Store. $(SSM_PARAMETER_PREFIX)
-          # is K8s-native env-var expansion that resolves against the
-          # ConfigMap-injected env vars (see configmap.yaml). When the
-          # parameter is absent or empty, the CLI falls back to env vars
-          # only — operators can disable SSM by clearing SSM_PARAMETER_PREFIX
-          # in the ConfigMap.
           command: ["nexus-ai-engine"]
-          args:
-            - "--log-level"
-            - "INFO"
-            - "serve"
-            - "--host"
-            - "0.0.0.0"
-            - "--port"
-            - "8000"
-            - "--ssm-prefix"
-            - "$(SSM_PARAMETER_PREFIX)"
+          args: ["serve", "--http", "--host", "0.0.0.0", "--port", "8000"]
           ports:
             - name: http
               containerPort: 8000
@@ -69,44 +42,41 @@ spec:
           envFrom:
             - configMapRef:
                 name: nexus-ai-engine-config
-            # Uncomment once a Secret named nexus-ai-engine-secrets exists:
-            # - secretRef:
-            #     name: nexus-ai-engine-secrets
           livenessProbe:
             httpGet:
               path: /health
               port: http
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 20
             timeoutSeconds: 5
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /readiness
+              path: /health
               port: http
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
           resources:
             requests:
-              cpu: "100m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
+              cpu: "200m"
               memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: reports
-              mountPath: /app/reports
+            - name: logs
+              mountPath: /app/logs
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: reports
+        - name: logs
           emptyDir: {}

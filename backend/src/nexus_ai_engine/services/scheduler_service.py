@@ -80,17 +80,23 @@ class SchedulerService:
 
     def _load_schedules_from_db(self):
         try:
-            response = self._table.query(
-                IndexName='GSI1',
-                KeyConditionExpression='GSI1PK = :pk',
-                ExpressionAttributeValues={':pk': 'SCHEDULES'},
-            )
+            from boto3.dynamodb.conditions import Attr
+
             self._schedules = {}
-            for item in response.get('Items', []):
-                data = item.get('Data', {})
-                schedule_id = data.get('scheduleId')
-                if schedule_id:
-                    self._schedules[schedule_id] = self._deserialize(data)
+            scan_kwargs: dict = {
+                "FilterExpression": Attr("EntityType").eq("BatchSchedule"),
+            }
+            while True:
+                response = self._table.scan(**scan_kwargs)
+                for item in response.get("Items", []):
+                    data = item.get("Data", {})
+                    schedule_id = data.get("scheduleId")
+                    if schedule_id:
+                        self._schedules[schedule_id] = self._deserialize(data)
+                last_key = response.get("LastEvaluatedKey")
+                if not last_key:
+                    break
+                scan_kwargs["ExclusiveStartKey"] = last_key
         except Exception as e:
             logger.error(f"Failed to load schedules: {e}")
 

@@ -318,14 +318,14 @@ Existing plugin journey YAML (`JourneyDefinition` in `plugin_models.py`) maps 1:
 Migration CLI:
 
 ```bash
-nexus-ai-engine journeys migrate-plugin-yaml --input plugin/journeys/ --output examples/journeys/
+nexus-ai-engine journeys migrate-plugin-yaml --input plugin/journeys/ --output sdk/examples/journeys/
 ```
 
 ---
 
 ## JSON Schema
 
-Generated to `schemas/journey-dsl-v1.json` from Pydantic models in
+Generated to `backend/schemas/journey-dsl-v1.json` from Pydantic models in
 `contracts/journey_dsl.py` (to be implemented).
 
 ---

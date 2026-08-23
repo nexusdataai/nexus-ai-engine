@@ -2,7 +2,7 @@
 
 Usage::
 
-    python -m nexus_ai_engine.contracts.export --out schemas/
+    python -m nexus_ai_engine.contracts.export --out backend/schemas/
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ def export_all(out_dir: Path) -> list[Path]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="nexus-ai-engine-contracts-export")
-    parser.add_argument("--out", default="schemas", type=Path)
+    parser.add_argument("--out", default="backend/schemas", type=Path)
     args = parser.parse_args()
     written = export_all(args.out)
     for path in written:

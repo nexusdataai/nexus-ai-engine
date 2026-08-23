@@ -419,17 +419,24 @@ class TransformationJobExecutor:
         """Get the next execution number for a stage"""
         try:
             response = self.table.query(
-                IndexName='GSI1',
-                KeyConditionExpression='GSI1PK = :gsi1pk',
-                ExpressionAttributeValues={':gsi1pk': f'STAGE#{journey_id}#{stage_id}'},
+                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk_prefix)',
+                ExpressionAttributeValues={
+                    ':pk': self._get_journey_pk(journey_id),
+                    ':sk_prefix': 'JOB#',
+                    ':stage_id': stage_id,
+                },
+                FilterExpression='#data.stageId = :stage_id',
+                ExpressionAttributeNames={'#data': 'Data'},
                 ScanIndexForward=False,
-                Limit=1,
             )
 
-            if response['Items']:
-                last_execution = response['Items'][0]['Data']['executionNumber']
-                return int(last_execution) + 1
-            return 1
+            max_num = 0
+            for item in response.get('Items', []):
+                data = item.get('Data', {})
+                if data.get('stageId') != stage_id:
+                    continue
+                max_num = max(max_num, int(data.get('executionNumber', 0)))
+            return max_num + 1 if max_num else 1
 
         except Exception as e:
             self.logger.error(f'Error getting next execution number: {str(e)}')

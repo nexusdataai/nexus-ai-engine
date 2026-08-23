@@ -391,8 +391,8 @@ class JourneyService:
                         stage_data = stage
                     else:
                         continue
-                    
-                    # Add the stage
+
+                    stage_data = convert_to_stage_data(stage_data)
                     try:
                         success = await loop.run_in_executor(
                             None,

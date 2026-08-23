@@ -2,48 +2,9 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: nexus-ai-engine-config
-  namespace: ai-engine
   labels:
     app.kubernetes.io/name: nexus-ai-engine
 data:
-  # Non-secret EngineConfig inputs. Secrets (API keys, role ARN overrides,
-  # etc.) belong in a separate Secret and should be referenced via
-  # `envFrom.secretRef` in the Deployment.
-  #
-  # ${ENV} placeholder is sed-substituted at apply time by deploy-and-test.sh.
-  AWS_REGION: "${REGION}"
-  ENVIRONMENT: "${ENV}"
   LOG_LEVEL: "INFO"
   API_HOST: "0.0.0.0"
   API_PORT: "8000"
-  MAX_CONCURRENT_JOBS: "10"
-
-  # The pod bootstraps EngineConfig from SSM Parameter Store using this
-  # prefix (consumed by `nexus-ai-engine serve --ssm-prefix
-  # $(SSM_PARAMETER_PREFIX)` in deployment.yaml). Operators must pre-seed
-  # the parameters with `deploy/admin/seed-ssm-parameters.sh ${ENV}` before
-  # the Deployment can come up healthy.
-  #
-  # Expected parameters under this prefix:
-  #   dynamodb_transformation_table   ai-engine-journeys-${ENV}
-  #   dynamodb_executions_table       ai-engine-executions-${ENV}
-  #   dynamodb_prompts_table          ai-engine-prompts-${ENV}
-  #   s3_journey_logs_bucket          ai-engine-journey-logs-${ENV}
-  #   s3_journey_reports_bucket       ai-engine-journey-reports-${ENV}
-  #
-  # Per-key DYNAMODB_* / S3_* environment variables still act as overrides
-  # for any field absent from SSM (see _SSM_TO_ENV_FALLBACK in
-  # src/nexus_ai_engine/server/cli.py).
-  SSM_PARAMETER_PREFIX: "/ai-engine/${ENV}/"
-
-  # Register the synthetic demo stages bundled with the library
-  # (order_to_cash, call_ingest, transcribe, analyze, demand_forecast,
-  # inventory_opt, supply_risk). Each step does bounded synthetic work
-  # (random sleep + emit_log per tick) so a fresh standalone pod is
-  # immediately runnable for performance / smoke testing without a host
-  # application registering domain stages.
-  #
-  # Set to "false" once nexus-backend (or another host) is registering
-  # real domain stages — leaving demos on would shadow the real
-  # implementations for any matching stage_id.
-  REGISTER_DEMO_STAGES: "true"

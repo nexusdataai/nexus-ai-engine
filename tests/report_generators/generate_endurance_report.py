@@ -32,8 +32,8 @@ Examples:
   
   # From test runner
   python tests/report_generators/generate_endurance_report.py \\
-    --input test_reports/endurance/endurance_report.json \\
-    --output test_reports/endurance/endurance_report_enhanced.html
+    --input tests/reports/endurance/endurance_report.json \\
+    --output tests/reports/endurance/endurance_report_enhanced.html
         '''
     )
     

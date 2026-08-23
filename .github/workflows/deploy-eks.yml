@@ -1,6 +1,6 @@
 name: Deploy reference server to EKS
 
-# Wraps deploy/deploy-and-test.sh for CI-driven deploys.
+# Wraps scripts/legacy-deploy/deploy-and-test.sh for CI-driven deploys.
 # Reuses nexus-backend's AWS infra: AWS_ROLE_TO_ASSUME_DEV, region us-east-1,
 # default cluster `nexus-dev`. Deploys into the new namespace `ai-engine`.
 
@@ -82,12 +82,12 @@ jobs:
         env:
           AWS_REGION: ${{ env.AWS_REGION }}
         run: |
-          chmod +x ./deploy/deploy-and-test.sh ./deploy/admin/setup-admin-role.sh
+          chmod +x ./scripts/legacy-deploy/deploy-and-test.sh ./scripts/legacy-deploy/admin/setup-admin-role.sh
           SKIP_PROVISION_FLAG=""
           if [ "${{ inputs.skip_provision }}" = "true" ]; then
             SKIP_PROVISION_FLAG="--skip-provision"
           fi
-          ./deploy/deploy-and-test.sh \
+          ./scripts/legacy-deploy/deploy-and-test.sh \
             --env "${{ inputs.environment }}" \
             --region "${{ env.AWS_REGION }}" \
             --cluster "${CLUSTER}" \
@@ -101,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bdd-report-${{ inputs.environment }}
-          path: reports/bdd-${{ inputs.environment }}.html
+          path: tests/reports/bdd-${{ inputs.environment }}.html
           retention-days: 14
           if-no-files-found: ignore
 

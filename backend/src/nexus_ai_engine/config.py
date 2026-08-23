@@ -48,7 +48,7 @@ class EngineConfig:
     max_concurrent_jobs: int = 10
     job_task_cleanup_interval_seconds: int = 60
 
-    capability_name: str = "call-processing"
+    capability_name: str = "ai-engine"
     environment: str = "dev"
 
     extras: dict = field(default_factory=dict)
@@ -85,23 +85,53 @@ def set_config(config: EngineConfig) -> None:
     _global_config = config
 
 
+def _env_or_default(key: str, default: str | None = None) -> str | None:
+    value = os.getenv(key)
+    return value if value else default
+
+
+def config_from_environment() -> EngineConfig:
+    """Build EngineConfig from environment with resource-naming fallbacks."""
+    from . import resource_naming as rn
+
+    cap = _env_or_default("CAPABILITY_NAME", "ai-engine") or "ai-engine"
+    env = _env_or_default("ENVIRONMENT", "dev") or "dev"
+
+    return EngineConfig(
+        region=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"),
+        role_arn=os.getenv("AWS_ROLE_ARN"),
+        dynamodb_transformation_table=(
+            os.getenv("DYNAMODB_TRANSFORMATION_TABLE")
+            or os.getenv("DYNAMODB_TABLE")
+            or rn.dynamodb_table_name("journeys", capability=cap, environment=env)
+        ),
+        dynamodb_executions_table=(
+            os.getenv("DYNAMODB_EXECUTIONS_TABLE")
+            or rn.dynamodb_table_name("executions", capability=cap, environment=env)
+        ),
+        dynamodb_prompts_table=(
+            os.getenv("DYNAMODB_PROMPTS_TABLE")
+            or rn.dynamodb_table_name("prompts", capability=cap, environment=env)
+        ),
+        s3_journey_logs_bucket=(
+            os.getenv("S3_JOURNEY_LOGS_BUCKET")
+            or rn.s3_bucket_name("journey-logs", capability=cap, environment=env)
+        ),
+        s3_journey_reports_bucket=(
+            os.getenv("S3_JOURNEY_REPORTS_BUCKET")
+            or rn.s3_bucket_name("journey-reports", capability=cap, environment=env)
+        ),
+        max_concurrent_jobs=int(os.getenv("MAX_CONCURRENT_JOBS", "10")),
+        capability_name=cap,
+        environment=env,
+    )
+
+
 def get_config() -> EngineConfig:
     """Return the wired engine config, defaulting to env-var-driven values."""
     global _global_config
     if _global_config is None:
-        _global_config = EngineConfig(
-            region=os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION"),
-            role_arn=os.getenv("AWS_ROLE_ARN"),
-            dynamodb_transformation_table=os.getenv("DYNAMODB_TRANSFORMATION_TABLE")
-            or os.getenv("DYNAMODB_TABLE"),
-            dynamodb_executions_table=os.getenv("DYNAMODB_EXECUTIONS_TABLE"),
-            dynamodb_prompts_table=os.getenv("DYNAMODB_PROMPTS_TABLE"),
-            s3_journey_logs_bucket=os.getenv("S3_JOURNEY_LOGS_BUCKET"),
-            s3_journey_reports_bucket=os.getenv("S3_JOURNEY_REPORTS_BUCKET"),
-            max_concurrent_jobs=int(os.getenv("MAX_CONCURRENT_JOBS", "10")),
-            capability_name=os.getenv("CAPABILITY_NAME", "call-processing"),
-            environment=os.getenv("ENVIRONMENT", "dev"),
-        )
+        _global_config = config_from_environment()
     return _global_config
 
 

@@ -10,6 +10,8 @@ routes for the library's.
 from __future__ import annotations
 
 import logging
+import os
+from contextlib import asynccontextmanager
 from typing import Any, Optional
 
 from fastapi import FastAPI
@@ -39,6 +41,34 @@ EXECUTIONS_PREFIX = "/api/v1/executions"
 API_V1_PREFIX = "/api/v1"
 PROMPTS_PREFIX = "/api/v1/prompts"
 SCHEDULES_PREFIX = "/api/v1/schedules"
+
+
+def _local_demo_seed_lifespan(engine: Optional[Any]):
+    """On local + DynamoDB engine startup, seed demo journeys if the table is empty."""
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI):
+        from ..factory import Engine
+
+        if isinstance(engine, Engine) and engine.config.environment == "local":
+            seed_on = os.environ.get("SEED_DEMO_JOURNEYS", "true").lower() not in (
+                "0",
+                "false",
+                "no",
+                "off",
+            )
+            if seed_on:
+                from ..services.demo_seed import seed_demo_journeys_if_empty
+
+                try:
+                    created = await seed_demo_journeys_if_empty(engine.journeys)
+                    if created:
+                        logger.info("Seeded %d demo journeys for local persisted dev", created)
+                except Exception:
+                    logger.exception("Demo journey seed failed on startup")
+        yield
+
+    return _lifespan
 
 
 def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]] = None) -> FastAPI:
@@ -79,6 +109,7 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
             "canonical HTTP surface ported from nexus-backend plus an embedded "
             "React UI for testing journeys, jobs, schedules, and prompts."
         ),
+        lifespan=_local_demo_seed_lifespan(engine),
     )
 
     app.state.engine = engine
@@ -131,8 +162,10 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
         # absorbs jobs + logs + reports + aggregate-report + stream URLs
         # (everything under /api/v1/journeys/*) — see endpoint listing in
         # legacy/journey_api.py for the full surface.
-        app.include_router(legacy_journey.router, prefix=JOURNEYS_PREFIX, tags=["journeys"])
+        # Mount DSL routes before legacy ``/{journey_id}`` catch-alls so paths
+        # like ``/api/v1/journeys/dsl`` are not treated as journey IDs.
         app.include_router(journey_dsl_router.router, prefix=JOURNEYS_PREFIX, tags=["journey-dsl"])
+        app.include_router(legacy_journey.router, prefix=JOURNEYS_PREFIX, tags=["journeys"])
         app.include_router(executions_router.router, prefix=EXECUTIONS_PREFIX, tags=["executions"])
         app.include_router(tool_packages_router.router, prefix=API_V1_PREFIX, tags=["tools"])
         # ``legacy/prompts_api`` already declares prefix="/api/v1/prompts"

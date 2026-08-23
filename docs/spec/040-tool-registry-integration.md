@@ -153,7 +153,7 @@ Today in nexus-backend, `o2c_tools.py` injects `VirtualQueryService` in-process.
 After migration:
 
 ```python
-# packages/tools-o2c/src/o2c_tools/match.py
+# sdk/tools-o2c/src/o2c_tools/match.py
 
 class O2cMatchOrderDeliveryInvoiceTool(Tool):
     tool_id = "o2c_match_order_delivery_invoice"
@@ -199,7 +199,7 @@ in-process service injection to HTTP via `ToolRuntime`.
 Shared library shipped with AI Engine and referenced by all domain tool packages.
 
 ```text
-packages/nexus-tool-sdk/
+sdk/nexus-tool-sdk/
 ├── src/nexus_tool_sdk/
 │   ├── runtime.py          # ToolRuntime factory (per dispatch)
 │   ├── vdl_client.py       # VdlClient, VdlQueryResult
@@ -527,7 +527,7 @@ Point SDK at staging ontology — **same HTTP contract as production**:
 
 ```bash
 ONTOLOGY_STAGING_URL=https://ontology-staging.svc \
-  pytest packages/tools-o2c/tests/integration/
+  pytest sdk/tools-o2c/tests/integration/
 ```
 
 ### Contract tests
@@ -658,7 +658,7 @@ VDL and Connector APIs are ontology MCP/API concerns ([041](./041-ontology-data-
 
 ## Implementation Checklist
 
-- [ ] `packages/nexus-tool-sdk` — VdlClient, ConnectorClient, ToolRuntime
+- [ ] `sdk/nexus-tool-sdk` — VdlClient, ConnectorClient, ToolRuntime
 - [ ] `Tool` base class aligned with nexus-sre contract
 - [ ] `ToolRegistry` + DynamoDB metadata store
 - [ ] `ToolDispatcher` with ExecutionPolicyEngine

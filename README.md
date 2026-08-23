@@ -96,11 +96,12 @@ Run backend and frontend on the host with hot reload, connected to the K3s local
 
 ```bash
 cd ../nexus-deployer/aws-login && ./set-context.sh 6
-cd ../kube-operator
+cd ../nexus-deployer/kube-operator
 ./operator.sh deploy
+cd ../local-k3s
 ./deploy-local-aws-stack.sh --kube-context local-cluster
-./verify-local-stack.sh --kube-context local-cluster
-../local-k3s/verify-local-boto3-apis.sh --kube-context local-cluster
+./tests/verify-local-stack.sh --kube-context local-cluster
+./tests/verify-local-boto3-apis.sh --kube-context local-cluster
 ```
 
 2. Register the `ai-engine-local` namespace (operator or raw manifest):

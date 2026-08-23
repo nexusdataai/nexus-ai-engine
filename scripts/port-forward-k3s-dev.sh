@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# port-forward-k3s-dev.sh — Forward K3s local stack services to localhost for host dev.
+# port-forward-k3s-dev.sh — Forward shared nexus-local stack for ai-engine host dev.
 #
 # Usage:
 #   ./scripts/port-forward-k3s-dev.sh

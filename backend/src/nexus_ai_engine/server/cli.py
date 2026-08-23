@@ -74,10 +74,17 @@ def _build_engine_config_from_ssm(prefix: str):
     """
     import boto3
 
+    from ..adapters.aws.localstack_config import LocalStackConfig
     from ..config import EngineConfig
 
     region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
-    ssm = boto3.client("ssm", region_name=region)
+    ssm_kwargs: dict = {"region_name": region}
+    ssm_endpoint = LocalStackConfig.from_environment().get_service_endpoint("ssm")
+    if ssm_endpoint:
+        ssm_kwargs["endpoint_url"] = ssm_endpoint
+        ssm_kwargs.setdefault("aws_access_key_id", os.environ.get("AWS_ACCESS_KEY_ID", "test"))
+        ssm_kwargs.setdefault("aws_secret_access_key", os.environ.get("AWS_SECRET_ACCESS_KEY", "test"))
+    ssm = boto3.client("ssm", **ssm_kwargs)
     params: dict[str, str] = {}
     paginator = ssm.get_paginator("get_parameters_by_path")
     for page in paginator.paginate(Path=prefix, Recursive=True, WithDecryption=True):

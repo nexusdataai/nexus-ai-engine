@@ -23,6 +23,25 @@ beforeEach(() => {
           headers: { "Content-Type": "application/json" },
         });
       }
+      if (url.includes("/api/v1/journeys/")) {
+        return new Response(JSON.stringify({ success: true, total: 0, data: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.includes("/api/v1/fleet")) {
+        return new Response(
+          JSON.stringify({
+            active: 0,
+            queued: 0,
+            failed: 0,
+            workers: 0,
+            global_limit: 10,
+            generated_at: new Date().toISOString(),
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
       return new Response(JSON.stringify([]), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -40,7 +59,7 @@ describe("App", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    expect(screen.getByText("Fleet overview")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Dashboard" })).toBeInTheDocument();
     expect(screen.getByTestId("active-execution-count")).toBeInTheDocument();
     expect(await screen.findByText("v0.3.0")).toBeInTheDocument();
   });

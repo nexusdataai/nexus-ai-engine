@@ -41,6 +41,10 @@ export type SimpleJourneySummary = {
   status: string;
   odaComponentType?: string;
   overallProgress?: number;
+  totalJobs?: number;
+  completedJobs?: number;
+  runningJobs?: number;
+  failedJobs?: number;
   createdAt?: string;
   updatedAt?: string;
 };

@@ -16,8 +16,8 @@ import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { id: "dashboard", name: "Dashboard", icon: LayoutDashboard, path: "/" },
-  { id: "journeys", name: "Journeys", icon: Route, path: "/journeys" },
   { id: "executions", name: "Executions", icon: PlayCircle, path: "/executions" },
+  { id: "journeys", name: "Journeys", icon: Route, path: "/journeys" },
   { id: "schedules", name: "Schedules", icon: Calendar, path: "/schedules" },
   { id: "tools", name: "Tools", icon: Wrench, path: "/tools" },
 ] as const;

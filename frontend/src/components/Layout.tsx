@@ -19,7 +19,8 @@ const TITLES: Record<string, string> = {
 };
 
 function resolveTitle(pathname: string): string {
-  if (pathname.startsWith("/journeys/") && pathname.endsWith("/studio")) return "Journey Studio";
+  if (pathname.startsWith("/executions/stage/")) return "Stage Job";
+  if (pathname.startsWith("/journeys/") && pathname.endsWith("/studio")) return "DSL Studio";
   if (pathname.startsWith("/journeys/")) return "Journey Detail";
   if (pathname.startsWith("/executions/")) return "Execution Detail";
   return TITLES[pathname] ?? "Journey Studio";

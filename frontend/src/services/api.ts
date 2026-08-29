@@ -1,5 +1,6 @@
 /** REST client for Nexus AI Engine (spec 060, 070). */
 
+import { normalizeStageJob, normalizeStageJourneyDetail } from "@/lib/stageJourney";
 import type {
   DslJourneySummary,
   JourneyListResponse,
@@ -13,6 +14,7 @@ import type {
   ToolDescriptor,
   ValidationResult,
 } from "@/types/api";
+import type { RegisteredStage, StageJob, StageJourneyDetail, UnifiedRunRow } from "@/types/stageJourney";
 import { authStore } from "@/services/authStore";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
@@ -88,6 +90,73 @@ export const api = {
 
   listSimpleJourneys: () =>
     apiFetch<JourneyListResponse>("/api/v1/journeys/").then((r) => r.data),
+
+  listRegisteredStages: () =>
+    apiFetch<{ count: number; stages: RegisteredStage[] }>("/api/v1/stages/registered").then(
+      (r) => r.stages ?? [],
+    ),
+
+  getStageJourney: async (journeyId: string): Promise<StageJourneyDetail> => {
+    const [raw, registry] = await Promise.all([
+      apiFetch<unknown>(`/api/v1/journeys/${journeyId}`),
+      api.listRegisteredStages().catch(() => [] as RegisteredStage[]),
+    ]);
+    return normalizeStageJourneyDetail(raw, journeyId, registry);
+  },
+
+  listJourneyJobs: async (journeyId: string): Promise<StageJob[]> => {
+    const raw = await apiFetch<{ jobs?: unknown[] }>(`/api/v1/journeys/${journeyId}/jobs`);
+    const jobs = Array.isArray(raw) ? raw : (raw.jobs ?? []);
+    return jobs.map((job) => normalizeStageJob(job, { journeyId }));
+  },
+
+  runStageJob: async (journeyId: string, stageId: string) => {
+    const qs = new URLSearchParams({ stage_id: stageId, triggered_by: "ui" });
+    const raw = await apiFetch<unknown>(`/api/v1/journeys/${journeyId}/jobs?${qs.toString()}`, {
+      method: "POST",
+      body: { stage_id: stageId, triggered_by: "ui" },
+    });
+    return normalizeStageJob(raw, { journeyId });
+  },
+
+  getStageJob: async (journeyId: string, jobId: string) => {
+    const raw = await apiFetch<unknown>(`/api/v1/journeys/${journeyId}/jobs/${jobId}`);
+    return normalizeStageJob(raw, { journeyId, jobId });
+  },
+
+  listAllRuns: async (): Promise<UnifiedRunRow[]> => {
+    const [journeys, dslExecutions] = await Promise.all([
+      api.listSimpleJourneys(),
+      api.listExecutions().catch(() => [] as ExecutionSummary[]),
+    ]);
+    const jobGroups = await Promise.all(
+      journeys.map(async (j) => {
+        const jobs = await api.listJourneyJobs(j.journeyId).catch(() => [] as StageJob[]);
+        return jobs.map(
+          (job): UnifiedRunRow => ({
+            kind: "stage_job",
+            id: job.id,
+            journeyId: j.journeyId,
+            journeyName: j.name,
+            stageId: job.stageId,
+            status: job.status,
+            startedAt: job.startedAt,
+          }),
+        );
+      }),
+    );
+    const dslRows: UnifiedRunRow[] = dslExecutions.map((ex) => ({
+      kind: "dsl_execution",
+      id: ex.execution_id,
+      journeyId: ex.journey_id,
+      status: ex.status,
+    }));
+    return [...jobGroups.flat(), ...dslRows].sort((a, b) => {
+      const ta = a.kind === "stage_job" ? a.startedAt ?? "" : "";
+      const tb = b.kind === "stage_job" ? b.startedAt ?? "" : "";
+      return tb.localeCompare(ta);
+    });
+  },
 
   exportJourney: (id: string, version?: number) =>
     apiFetch<{ journey_id: string; yaml: string }>(`/api/v1/journeys/${id}/export`, {

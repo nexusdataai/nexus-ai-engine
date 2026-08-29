@@ -29,21 +29,44 @@ export function DashboardPage() {
     queryFn: () => api.listExecutions({ status: "running" }),
     refetchInterval: 5_000,
   });
+  const journeys = useQuery({
+    queryKey: ["simple-journeys"],
+    queryFn: () => api.listSimpleJourneys(),
+    refetchInterval: 10_000,
+  });
+  const recentRuns = useQuery({
+    queryKey: ["runs"],
+    queryFn: () => api.listAllRuns(),
+    refetchInterval: 5_000,
+  });
 
   const summary = fleet.data;
   const throughput = metrics.data?.throughput;
   const p95 = metrics.data?.tool_dispatch_p95_ms;
+  const journeyRows = journeys.data ?? [];
+  const journeyJobTotal = journeyRows.reduce((n, j) => n + Number(j.totalJobs ?? 0), 0);
+  const journeyRunning = journeyRows.reduce((n, j) => n + Number(j.runningJobs ?? 0), 0);
+  const recent = (recentRuns.data ?? []).slice(0, 8);
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold">Fleet overview</h2>
+        <h2 className="text-xl font-semibold">Dashboard</h2>
         <p className="text-sm text-muted-foreground">
-          Indigenous fleet monitor — executions, queue depth, workers, and 24h throughput.
+          Fleet health, journey activity, and recent executions in one view.
         </p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Journeys</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-3xl font-bold">{journeys.isLoading ? "…" : journeyRows.length}</p>
+            <p className="text-xs text-muted-foreground mt-1">{journeyJobTotal} total stage jobs</p>
+          </CardContent>
+        </Card>
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -53,7 +76,7 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold" data-testid="active-execution-count">
-              {fleet.isLoading ? "…" : (summary?.active ?? 0)}
+              {fleet.isLoading ? "…" : (summary?.active ?? 0) + journeyRunning}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Limit {summary?.global_limit ?? "—"}
@@ -161,13 +184,60 @@ export function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Running now</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Recent runs</CardTitle>
+            <Link to="/executions" className="text-sm text-primary hover:underline">
+              View all
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {recentRuns.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : recent.length === 0 ? (
+            <EmptyState
+              title="No runs yet"
+              description="Start a stage job from Journeys or submit a DSL execution."
+              action={
+                <Link to="/journeys" className="text-sm text-primary hover:underline">
+                  Open journeys
+                </Link>
+              }
+            />
+          ) : (
+            <ul className="divide-y divide-border">
+              {recent.map((run) => (
+                <li key={`${run.kind}-${run.id}`} className="py-2 flex items-center justify-between gap-2">
+                  <Link
+                    to={
+                      run.kind === "stage_job"
+                        ? `/executions/stage/${run.journeyId}/${run.id}`
+                        : `/executions/${run.id}`
+                    }
+                    className="text-sm text-primary hover:underline font-mono"
+                  >
+                    {truncateId(run.id, 14)}
+                  </Link>
+                  <span className="text-sm text-muted-foreground truncate">
+                    {run.kind === "stage_job" ? run.journeyName ?? run.journeyId : run.journeyId}
+                  </span>
+                  <StatusBadge status={run.status} />
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">DSL executions running</CardTitle>
         </CardHeader>
         <CardContent>
           {running.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : (running.data?.length ?? 0) === 0 ? (
-            <EmptyState title="No active executions" description="Submit a journey from the studio to start one." />
+            <EmptyState title="No active DSL executions" description="DSL runs appear here when submitted from the YAML studio." />
           ) : (
             <ul className="divide-y divide-border">
               {running.data!.map((ex) => (

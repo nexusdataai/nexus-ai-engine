@@ -8,9 +8,11 @@ import { ExecutionsListPage } from "@/pages/ExecutionsListPage";
 import { JourneyDetailPage } from "@/pages/JourneyDetailPage";
 import { JourneyStudioPage } from "@/pages/JourneyStudioPage";
 import { JourneysListPage } from "@/pages/JourneysListPage";
+import { QueuePage } from "@/pages/QueuePage";
 import { SchedulesPage } from "@/pages/SchedulesPage";
 import { StageJobDetailPage } from "@/pages/StageJobDetailPage";
 import { ToolsCatalogPage } from "@/pages/ToolsCatalogPage";
+import { WorkersPage } from "@/pages/WorkersPage";
 
 export default function App() {
   return (
@@ -23,6 +25,8 @@ export default function App() {
         <Route path="executions" element={<ExecutionsListPage />} />
         <Route path="executions/stage/:journeyId/:jobId" element={<StageJobDetailPage />} />
         <Route path="executions/:executionId" element={<ExecutionDetailPage />} />
+        <Route path="queue" element={<QueuePage />} />
+        <Route path="workers" element={<WorkersPage />} />
         <Route path="schedules" element={<SchedulesPage />} />
         <Route path="tools" element={<ToolsCatalogPage />} />
         <Route path="auth/callback" element={<AuthCallbackPage />} />

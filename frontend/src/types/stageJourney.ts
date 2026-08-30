@@ -23,8 +23,11 @@ export type StageJourneyStage = {
 export type StageJob = {
   id: string;
   journeyId: string;
+  jobType?: "journey" | "stage" | string;
+  stageIds?: string[];
   stageId: string;
   stageName?: string;
+  currentStageId?: string;
   status: string;
   progress: number;
   triggeredBy?: string;
@@ -56,6 +59,8 @@ export type UnifiedRunRow =
       id: string;
       journeyId: string;
       journeyName?: string;
+      jobType?: string;
+      stageIds?: string[];
       stageId?: string;
       status: string;
       startedAt?: string | null;

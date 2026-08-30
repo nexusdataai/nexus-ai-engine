@@ -301,7 +301,6 @@ class JourneyActionRequest(BaseModel):
             JourneyAction.UPDATE_STAGE,
             JourneyAction.DELETE_STAGE,
             JourneyAction.ADD_RULE,
-            JourneyAction.RUN_JOB,
         ]
         
         if action in stage_required_actions and not stage_id:

@@ -5,6 +5,7 @@ Direct HTTP endpoints for low-latency journey operations
 
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse, JSONResponse
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import asyncio
@@ -147,6 +148,10 @@ if service_available:
         journey_service = None
 else:
     journey_service = None
+
+
+class BatchDeleteJobsRequest(BaseModel):
+    job_ids: List[str] = Field(..., min_length=1, description="Job IDs to delete")
 
 
 # ==========================================
@@ -866,28 +871,28 @@ async def delete_stage(journey_id: str, stage_id: str) -> Dict[str, Any]:
 @router.post("/{journey_id}/jobs")
 async def run_job(
     journey_id: str,
-    stage_id: str = Query(..., description="Stage ID to execute"),
+    stage_id: Optional[str] = Query(None, description="Stage ID to execute (omit to run full journey pipeline)"),
     triggered_by: str = Query("api", description="Who triggered the job"),
     reason: Optional[str] = Query(None, description="Reason for execution"),
     wait_for_completion: bool = Query(False, description="Wait for job to complete"),
     config: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
-    Run a job on a specific stage
-    
-    Creates and executes a job for the specified stage.
-    The job runs synchronously but updates progress in DynamoDB so UI can poll.
+    Run a job on a journey.
+
+    When ``stage_id`` is omitted, starts a single journey-level job that runs
+    all configured stages sequentially. When provided, runs one stage only.
     """
     try:
         if journey_service and models_available:
-            # Execute job - the service creates the job record and runs it
-            # Progress is updated in DynamoDB, so UI can poll for status
             action_request = JourneyActionRequest(
                 action="run_job",
                 journey_id=journey_id,
                 stage_id=stage_id,
                 triggered_by=triggered_by,
-                reason=reason or f"API execution for stage {stage_id}"
+                reason=reason or (
+                    f"API execution for stage {stage_id}" if stage_id else "API journey pipeline execution"
+                )
             )
             
             result = await journey_service.execute_action(action_request)
@@ -1278,6 +1283,76 @@ async def cancel_job(
         raise
     except Exception as e:
         logger.error(f"Error cancelling job: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.delete("/{journey_id}/jobs/{job_id}")
+async def delete_job(
+    journey_id: str,
+    job_id: str,
+) -> Dict[str, Any]:
+    """Delete a finished job and its DynamoDB records plus S3 logs/reports."""
+    try:
+        if journey_service and models_available:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                journey_service.manager.delete_job,
+                journey_id,
+                job_id,
+            )
+            if not result.get("success"):
+                raise HTTPException(status_code=400, detail=result.get("error", "Delete failed"))
+            return {
+                "success": True,
+                "message": f"Job {job_id} deleted",
+                "journey_id": journey_id,
+                "job_id": job_id,
+                "data": result,
+            }
+        return {
+            "success": True,
+            "message": f"Job {job_id} deleted (test)",
+            "journey_id": journey_id,
+            "job_id": job_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting job: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/{journey_id}/jobs/batch-delete")
+async def batch_delete_jobs(
+    journey_id: str,
+    request: BatchDeleteJobsRequest,
+) -> Dict[str, Any]:
+    """Delete multiple finished jobs for a journey."""
+    try:
+        if journey_service and models_available:
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                None,
+                journey_service.manager.batch_delete_jobs,
+                journey_id,
+                request.job_ids,
+            )
+            return {
+                "success": True,
+                "message": f"Deleted {result.get('successful', 0)}/{result.get('total', 0)} jobs",
+                "journey_id": journey_id,
+                "data": result,
+            }
+        return {
+            "success": True,
+            "message": f"Batch delete completed (test) for {len(request.job_ids)} jobs",
+            "journey_id": journey_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error batch deleting jobs: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

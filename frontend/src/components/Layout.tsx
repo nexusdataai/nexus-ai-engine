@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Menu } from "lucide-react";
+import { Menu, PanelLeft } from "lucide-react";
 import { useLocation } from "react-router-dom";
 
 import { Sidebar } from "@/components/Sidebar";
 import { SidebarChromeProvider, useSidebarChrome } from "@/components/SidebarChrome";
+import { InactivityGuard } from "@/components/InactivityGuard";
 import { ThemeToggle, UserMenu } from "@/components/UserMenu";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/useTheme";
@@ -14,6 +15,8 @@ const TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/journeys": "Journeys",
   "/executions": "Executions",
+  "/queue": "Queue",
+  "/workers": "Workers",
   "/schedules": "Schedules",
   "/tools": "Tools Catalog",
 };
@@ -29,16 +32,29 @@ function resolveTitle(pathname: string): string {
 function LayoutInner({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const { theme, toggleTheme } = useTheme();
-  const { setMobileOpen } = useSidebarChrome();
+  const { setMobileOpen, mini, setMini } = useSidebarChrome();
   const { data } = useQuery({ queryKey: ["version"], queryFn: fetchVersion });
   const title = resolveTitle(loc.pathname);
 
   return (
     <div className="min-h-screen h-screen flex overflow-hidden bg-background text-foreground">
+      <InactivityGuard />
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
         <header className="flex items-center justify-between px-3 sm:px-5 h-12 shrink-0 border-b border-border bg-card">
           <div className="flex items-center gap-2 min-w-0">
+            {mini ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="hidden md:inline-flex shrink-0"
+                aria-label="Expand sidebar"
+                onClick={() => setMini(false)}
+              >
+                <PanelLeft className="h-4 w-4" />
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="ghost"

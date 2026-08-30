@@ -33,6 +33,7 @@ dependencies = [
     # adapters all import boto3 unconditionally.
     "boto3>=1.38",
     "botocore>=1.38",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -48,6 +49,7 @@ server = [
     "httpx>=0.28",
     "fastmcp>=2.12",
     "prometheus-client>=0.20",
+    "kubernetes>=31.0",
 ]
 harness = [
     "nexus-ai-engine[server]",
@@ -93,7 +95,8 @@ dev = [
 
 [project.scripts]
 nexus-ai-engine = "nexus_ai_engine.server.cli:main"
-nexus-ai-engine-worker = "nexus_ai_engine.workers.temporal.worker_main:main"
+nexus-ai-engine-worker = "nexus_ai_engine.workers.job_worker:main"
+nexus-ai-engine-temporal-worker = "nexus_ai_engine.workers.temporal.worker_main:main"
 
 [project.entry-points.pytest11]
 nexus_ai_engine = "nexus_ai_engine.testing.fixtures"

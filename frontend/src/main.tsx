@@ -5,6 +5,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import App from "@/App";
 import "@/styles.css";
+import "react-day-picker/dist/style.css";
 
 try {
   const theme = localStorage.getItem("nexus-ai-engine-theme");

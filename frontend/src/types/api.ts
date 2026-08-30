@@ -86,6 +86,10 @@ export type FleetSummary = {
   workers: number;
   global_limit: number;
   running_counter?: number | null;
+  dsl_executions_active?: number;
+  dsl_executions_queued?: number;
+  stage_jobs_active?: number;
+  stage_jobs_queued?: number;
   generated_at: string;
 };
 
@@ -105,4 +109,77 @@ export type FleetWorker = {
   execution_id?: string | null;
   lock_expires_at?: string | null;
   last_seen: string;
+};
+
+export type QueueJob = {
+  stream_id: string;
+  job_id: string;
+  journey_id: string;
+  job_kind: string;
+  stage_id?: string;
+  state: "waiting" | "claimed" | "running";
+  consumer_name?: string;
+  idle_ms?: number;
+  enqueued_at?: number | null;
+  triggered_by?: string;
+};
+
+export type QueueSummary = {
+  lag: number;
+  pending: number;
+  active: number;
+  queued: number;
+  max_global: number;
+  consumer_count: number;
+  generated_at: string;
+};
+
+export type QueueJobsResponse = {
+  jobs: QueueJob[];
+  count: number;
+  state: string;
+};
+
+export type WorkerRow = {
+  worker_id: string;
+  consumer_name?: string | null;
+  status: string;
+  pending_jobs: number;
+  idle_ms: number;
+  current_job?: {
+    job_id: string;
+    journey_id: string;
+    idle_ms?: number;
+  } | null;
+  phase?: string | null;
+  restarts?: number;
+  start_time?: string | null;
+  last_seen: string;
+};
+
+export type WorkersSummary = {
+  queue_mode: boolean;
+  redis_available: boolean;
+  k8s_available: boolean;
+  deployment: {
+    name: string;
+    desired: number;
+    ready: number;
+    available: number;
+  };
+  replicas: number;
+  consumers: number;
+  registered_consumers?: number;
+  stale_consumers?: number;
+  healthy_consumers: number;
+  active_jobs: number;
+  autoscaling: {
+    enabled: boolean;
+    min_replicas: number;
+    max_replicas: number;
+    lag_threshold: number;
+    keda_available: boolean;
+  };
+  max_worker_replicas: number;
+  generated_at: string;
 };

@@ -56,7 +56,35 @@ class ExecutionRuntimeService:
                 await self.repository.put_graph(state.tenant_id, state.execution_id, graph)
         await self.admission.on_started(state.execution_id)
         await self._broadcast(state, "execution.submitted")
-        self._spawn_run(state.execution_id)
+
+        from ..services.job_queue_service import (
+            enqueue_job,
+            get_active_job_count,
+            get_max_global_jobs,
+            get_pending_count,
+            is_queue_mode,
+            redis_available,
+        )
+
+        if is_queue_mode():
+            if not redis_available():
+                raise RuntimeError("JOB_EXECUTION_MODE=queue requires REDIS_URL but Redis is unavailable")
+            active = get_active_job_count()
+            pending = get_pending_count()
+            max_global = get_max_global_jobs()
+            if active + pending >= max_global:
+                raise AdmissionRejectedError(
+                    f"Maximum global jobs ({max_global}) reached (active={active}, pending={pending})"
+                )
+            enqueue_job(
+                job_id=str(state.execution_id),
+                journey_id=state.journey_id,
+                job_kind="dsl_execution",
+                triggered_by=submitted_by,
+                reason=trace_id,
+            )
+        else:
+            self._spawn_run(state.execution_id)
         return state
 
     def _spawn_run(self, execution_id: UUID) -> None:

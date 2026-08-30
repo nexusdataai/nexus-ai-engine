@@ -47,6 +47,12 @@ _SSM_TO_ENV_FALLBACK = {
     "s3_journey_logs_bucket":         "S3_JOURNEY_LOGS_BUCKET",
     "s3_journey_reports_bucket":      "S3_JOURNEY_REPORTS_BUCKET",
     "max_concurrent_jobs":            "MAX_CONCURRENT_JOBS",
+    "redis_url":                      "REDIS_URL",
+    "job_stream_key":                 "JOB_STREAM_KEY",
+    "job_consumer_group":             "JOB_CONSUMER_GROUP",
+    "job_execution_mode":             "JOB_EXECUTION_MODE",
+    "max_global_jobs":                "MAX_GLOBAL_JOBS",
+    "sse_redis_enabled":              "SSE_REDIS_ENABLED",
     "capability_name":                "CAPABILITY_NAME",
     "environment":                    "ENVIRONMENT",
 }
@@ -114,6 +120,17 @@ def _build_engine_config_from_ssm(prefix: str):
         s3_journey_logs_bucket=_ssm_or_env("s3_journey_logs_bucket"),
         s3_journey_reports_bucket=_ssm_or_env("s3_journey_reports_bucket"),
         max_concurrent_jobs=int(_ssm_or_env("max_concurrent_jobs") or "10"),
+        redis_url=_ssm_or_env("redis_url"),
+        job_stream_key=_ssm_or_env("job_stream_key") or "ai-engine:jobs",
+        job_consumer_group=_ssm_or_env("job_consumer_group") or "ai-engine-workers",
+        job_execution_mode=(
+            "queue"
+            if str(_ssm_or_env("job_execution_mode") or "inline").lower() == "queue"
+            else "inline"
+        ),
+        max_global_jobs=int(_ssm_or_env("max_global_jobs") or _ssm_or_env("max_concurrent_jobs") or "10"),
+        sse_redis_enabled=str(_ssm_or_env("sse_redis_enabled") or "true").lower()
+        not in ("0", "false", "no"),
         capability_name=_ssm_or_env("capability_name") or "ai-engine",
         environment=_ssm_or_env("environment") or "dev",
     )
@@ -186,6 +203,13 @@ def _cmd_print_demo_journeys(args: argparse.Namespace) -> int:
     from ..stages import DEMO_JOURNEYS
 
     print(json.dumps(DEMO_JOURNEYS, indent=2))
+    return 0
+
+
+def _cmd_worker(args: argparse.Namespace) -> int:
+    from ..workers.job_worker import main as worker_main
+
+    worker_main()
     return 0
 
 
@@ -270,6 +294,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Print the bundled demo journey definitions as JSON (used by seed scripts)",
     )
     pdj.set_defaults(func=_cmd_print_demo_journeys)
+
+    worker = sub.add_parser("worker", help="Run Redis Streams job worker process")
+    worker.set_defaults(func=_cmd_worker)
 
     args = parser.parse_args(argv)
     _configure_logging(args.log_level)

@@ -51,9 +51,25 @@ class FleetMonitorService:
 
     async def summary(self) -> dict[str, Any]:
         states = await self._list_states()
-        active = sum(1 for s in states if s.status in _ACTIVE)
-        queued = sum(1 for s in states if s.status is ExecutionStatus.PENDING)
+        dsl_active = sum(1 for s in states if s.status in _ACTIVE)
+        dsl_queued = sum(1 for s in states if s.status is ExecutionStatus.PENDING)
         failed = sum(1 for s in states if s.status is ExecutionStatus.FAILED)
+
+        stage_active = 0
+        stage_queued = 0
+        try:
+            from nexus_ai_engine.services.job_queue_service import (
+                get_active_job_count,
+                get_stage_jobs_queued,
+                is_queue_mode,
+                redis_available,
+            )
+
+            if is_queue_mode() and redis_available():
+                stage_active = get_active_job_count()
+                stage_queued = get_stage_jobs_queued()
+        except Exception:
+            pass
 
         config = get_config()
         global_limit = config.max_concurrent_jobs
@@ -64,12 +80,16 @@ class FleetMonitorService:
 
         workers = await self.workers()
         return {
-            "active": active,
-            "queued": queued,
+            "active": dsl_active + stage_active,
+            "queued": dsl_queued + stage_queued,
             "failed": failed,
             "workers": len(workers.get("workers", [])),
             "global_limit": global_limit,
             "running_counter": running_counter,
+            "dsl_executions_active": dsl_active,
+            "dsl_executions_queued": dsl_queued,
+            "stage_jobs_active": stage_active,
+            "stage_jobs_queued": stage_queued,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 

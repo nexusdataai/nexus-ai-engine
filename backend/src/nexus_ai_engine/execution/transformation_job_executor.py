@@ -8,7 +8,7 @@ import uuid
 import inspect
 from datetime import datetime
 from decimal import Decimal
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 # Import the stage registry from the stages package
 from ..stages import get_stage_class, list_available_stages
@@ -77,10 +77,204 @@ class TransformationJobExecutor:
         else:
             self.logger.info("Job executor configured with default credential chain")
 
+    def _write_to_dlq(
+        self,
+        job_id: str,
+        journey_id: str,
+        stage_id: str,
+        error: str,
+        context: dict | None = None,
+    ) -> None:
+        """Write failed job to dead letter queue for later inspection/retry."""
+        try:
+            from .. import resource_naming as rn
+
+            cfg = get_config()
+            table_name = os.getenv("DYNAMODB_DLQ_TABLE") or rn.dynamodb_table_name(
+                "dlq", capability=cfg.capability_name, environment=cfg.environment
+            )
+            table = self.dynamodb.Table(table_name)
+            now = datetime.utcnow().isoformat() + "Z"
+            table.put_item(
+                Item={
+                    "PK": "dlq",
+                    "SK": f"{now}#{job_id}",
+                    "EntityType": "JobDLQ",
+                    "job_id": job_id,
+                    "journey_id": journey_id,
+                    "stage_id": stage_id,
+                    "error": str(error)[:2000],
+                    "context": str(context)[:5000] if context else "",
+                    "timestamp": now,
+                    "status": "pending_review",
+                }
+            )
+        except Exception as exc:
+            self.logger.warning("DLQ write failed for job %s: %s", job_id, exc)
+
     def _get_journey_pk(self, journey_id: str) -> str:
         """Helper method to get the correct DynamoDB PK for a journey.
         Uses the same format as journey service: JOURNEY#{journey_id}"""
         return f'JOURNEY#{journey_id}'
+
+    def _job_sk(self, job_data: Dict, job_id: str) -> str:
+        """Build DynamoDB SK for a job record."""
+        if job_data.get('jobType') == 'journey':
+            execution_number = int(job_data.get('executionNumber', 0))
+            timestamp = job_id.split('-')[-1]
+            return f'JOB#JRN#{execution_number:03d}#{timestamp}'
+        stage_id = job_data['stageId']
+        execution_number = job_data['executionNumber']
+        timestamp = job_id.split('-')[-1]
+        return f'JOB#{int(job_data["stageOrder"]):02d}#{stage_id}#{int(execution_number):03d}#{timestamp}'
+
+    def get_journey_stages_ordered(self, journey_id: str) -> List[Dict]:
+        """List journey stages from DynamoDB ordered by pipeline sequence."""
+        try:
+            response = self.table.query(
+                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+                ExpressionAttributeValues={
+                    ':pk': self._get_journey_pk(journey_id),
+                    ':sk': 'STAGE#',
+                },
+            )
+            stages = [item['Data'] for item in response.get('Items', []) if item.get('Data')]
+            stages.sort(key=lambda s: s.get('order', 0))
+            return stages
+        except Exception as e:
+            self.logger.error(f'Error listing journey stages: {str(e)}')
+            return []
+
+    def get_next_journey_execution_number(self, journey_id: str) -> int:
+        """Next execution number for journey-level (multi-stage) jobs."""
+        try:
+            response = self.table.query(
+                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+                ExpressionAttributeValues={
+                    ':pk': self._get_journey_pk(journey_id),
+                    ':sk': 'JOB#',
+                },
+                ScanIndexForward=False,
+            )
+            max_num = 0
+            for item in response.get('Items', []):
+                data = item.get('Data', {})
+                if data.get('jobType') == 'journey':
+                    max_num = max(max_num, int(data.get('executionNumber', 0)))
+                elif item.get('SK', '').startswith('JOB#JRN#'):
+                    max_num = max(max_num, int(data.get('executionNumber', 0)))
+            return max_num + 1 if max_num else 1
+        except Exception as e:
+            self.logger.error(f'Error getting journey execution number: {str(e)}')
+            return 1
+
+    def start_journey_job_execution(
+        self,
+        journey_id: str,
+        stage_ids: Optional[List[str]] = None,
+        triggered_by: str = 'system',
+        reason: str = 'Journey pipeline execution',
+    ) -> str:
+        """Start a single journey-level job that runs all stages sequentially."""
+        journey = self.get_journey(journey_id)
+        if not journey:
+            raise Exception(f'Journey {journey_id} not found')
+
+        stages = self.get_journey_stages_ordered(journey_id)
+        if stage_ids:
+            wanted = set(stage_ids)
+            stages = [s for s in stages if s.get('stageId') in wanted]
+        if not stages:
+            raise ValueError(f'No stages configured for journey {journey_id}')
+
+        stage_ids_ordered = [s['stageId'] for s in stages]
+        for sid in stage_ids_ordered:
+            if sid not in list_available_stages():
+                raise ValueError(f'Stage {sid} not implemented. Available: {", ".join(list_available_stages())}')
+
+        timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
+        execution_number = self.get_next_journey_execution_number(journey_id)
+        job_id = f'JOB-{execution_number:03d}-{timestamp}'
+        sk = f'JOB#JRN#{execution_number:03d}#{timestamp}'
+
+        stage_results: Dict[str, Any] = {}
+        total_steps = 0
+        for stage_row in stages:
+            sid = stage_row['stageId']
+            stage_info = self.get_stage_info(sid)
+            if not stage_info:
+                raise ValueError(f'Stage {sid} not found in stage registry')
+            steps = stage_info['steps']
+            total_steps += len(steps)
+            stage_results[sid] = {
+                'stageId': sid,
+                'stageName': stage_info.get('stage_name', sid),
+                'status': 'pending',
+                'stepResults': {
+                    step['id']: {'status': 'pending', 'progress': Decimal('0')}
+                    for step in steps
+                },
+            }
+
+        first_stage_id = stage_ids_ordered[0]
+        first_stage_info = self.get_stage_info(first_stage_id)
+        first_steps = first_stage_info['steps']
+
+        job_item = {
+            'PK': self._get_journey_pk(journey_id),
+            'SK': sk,
+            'EntityType': 'JobExecution',
+            'GSI1PK': f'JOURNEYJOB#{journey_id}',
+            'GSI1SK': datetime.utcnow().isoformat() + 'Z',
+            'CreatedAt': datetime.utcnow().isoformat() + 'Z',
+            'UpdatedAt': datetime.utcnow().isoformat() + 'Z',
+            'Data': {
+                'jobId': job_id,
+                'jobType': 'journey',
+                'journeyId': journey_id,
+                'stageIds': stage_ids_ordered,
+                'stageId': first_stage_id,
+                'stageName': journey.get('name', journey_id),
+                'currentStageId': first_stage_id,
+                'currentStageIndex': 0,
+                'totalStages': len(stage_ids_ordered),
+                'totalSteps': total_steps,
+                'stageResults': stage_results,
+                'executionNumber': execution_number,
+                'status': 'in_progress',
+                'startTime': datetime.utcnow().isoformat() + 'Z',
+                'endTime': None,
+                'duration': None,
+                'progress': Decimal('0'),
+                'triggeredBy': triggered_by,
+                'triggerReason': reason,
+                'retryAttempt': 0,
+                's3Config': {
+                    'logsBucket': self.logs_bucket,
+                    'logsPrefix': f'journeys/{journey_id}/executions/{job_id}/',
+                    'reportsBucket': self.reports_bucket,
+                    'reportsPrefix': f'journeys/{journey_id}/executions/{job_id}/',
+                    'region': self.region_name,
+                },
+                'currentStepIndex': 0,
+                'currentStepId': first_steps[0]['id'] if first_steps else None,
+                'stepResults': stage_results[first_stage_id]['stepResults'],
+                'jobMetrics': {
+                    'totalLogs': 0,
+                    'totalErrors': 0,
+                    'totalWarnings': 0,
+                    'overallProgress': Decimal('0'),
+                    'itemsProcessed': 0,
+                    'itemsTotal': 0,
+                },
+            },
+        }
+
+        self.table.put_item(Item=job_item)
+        self.logger.info(
+            f'✅ Started journey job {job_id} for {len(stage_ids_ordered)} stages: {", ".join(stage_ids_ordered)}'
+        )
+        return job_id
 
     def start_job_execution(
         self,
@@ -139,6 +333,7 @@ class TransformationJobExecutor:
                 'UpdatedAt': datetime.utcnow().isoformat() + 'Z',
                 'Data': {
                     'jobId': job_id,
+                    'jobType': 'stage',
                     'journeyId': journey_id,
                     'stageId': stage_id,
                     'stageName': stage_name,
@@ -192,123 +387,83 @@ class TransformationJobExecutor:
             raise
 
     def execute_job(self, journey_id: str, job_id: str):
-        """Execute all steps in a job using stage-based architecture"""
+        """Execute a job — single stage or full journey pipeline."""
+        job_data = self.get_job_execution(journey_id, job_id)
+        if not job_data:
+            self.logger.error(f'❌ Job {job_id} not found for journey {journey_id}')
+            raise ValueError(f'Job {job_id} not found')
+        if job_data.get('jobType') == 'journey':
+            return self.execute_journey_job(journey_id, job_id)
+        return self._execute_stage_job(journey_id, job_id, job_data)
+
+    def execute_journey_job(self, journey_id: str, job_id: str):
+        """Execute all stages in a journey-level job sequentially."""
+        job_data = self.get_job_execution(journey_id, job_id)
+        if not job_data:
+            raise ValueError(f'Job {job_id} not found')
+
+        stage_ids = job_data.get('stageIds') or [job_data.get('stageId')]
+        total_stages = len(stage_ids)
+        total_items_processed = 0
+        total_items_total = 0
+        combined_metrics: Dict[str, Any] = {}
+
         try:
-            # Get job data
-            job_data = self.get_job_execution(journey_id, job_id)
-            if not job_data:
-                self.logger.error(f'❌ Job {job_id} not found for journey {journey_id}')
-                raise ValueError(f'Job {job_id} not found')
-
-            stage_id = job_data['stageId']
-            
-            # Quick validation - check if stage is available
-            if stage_id not in list_available_stages():
-                self.logger.error(f'❌ Stage {stage_id} not available for execution')
-                self.update_job_status(journey_id, job_id, 'failed', 
-                                     error_message=f'Stage {stage_id} not available')
-                raise ValueError(f'Stage {stage_id} not available for execution')
-            
-            # Get stage class
-            stage_class = get_stage_class(stage_id)
-            if not stage_class:
-                self.logger.error(f'❌ Stage class not found for stage: {stage_id}')
-                self.update_job_status(journey_id, job_id, 'failed',
-                                     error_message=f'Stage class not found for stage: {stage_id}')
-                raise ValueError(f'Stage class not found for stage: {stage_id}')
-
-            # Create stage instance with role ARN support
-            stage = stage_class(journey_id, stage_id, job_id, self.region_name, self.role_arn)
-            steps = stage.steps
-
-            self.logger.info(f'🚀 Executing job {job_id} with {len(steps)} steps using {stage_class.__name__}')
-            
-            # DEBUG: Log what steps we're about to execute
-            self.logger.info('📋 Steps to execute:')
-            for i, step in enumerate(steps):
-                self.logger.info(f'  {i+1}. {step["id"]} - {step["name"]}')
-            self.logger.info(f'🔢 Total steps in execution list: {len(steps)}')
-
-            # Execute each step using the stage implementation
-            for step_index, step in enumerate(steps):
-                step_id = step['id']
-
+            for stage_index, stage_id in enumerate(stage_ids):
                 if self.is_job_cancelled(job_id):
-                    self.logger.info(f'🛑 Job {job_id} cancelled before step {step_id}')
                     raise JobCancelledException(f'Job {job_id} cancelled')
 
-                self.logger.info(f'📝 Starting step {step_index + 1}/{len(steps)}: {step["name"]} (ID: {step_id})')
+                stage_info = self.get_stage_info(stage_id)
+                if not stage_info:
+                    raise ValueError(f'Stage {stage_id} not available')
 
-                try:
-                    self.update_step_status(journey_id, job_id, step_id, 'in_progress', step_index)
+                self._set_journey_current_stage(journey_id, job_id, stage_id, stage_index, stage_info)
+                self.logger.info(
+                    f'🚀 Journey job {job_id}: stage {stage_index + 1}/{total_stages} — {stage_id}'
+                )
 
-                    step_result = stage.execute_step(step_id, step)
-                    self.logger.info(f'✅ Step execution completed for {step_id}, result status: {step_result.get("status", "unknown")}')
+                metrics = self._execute_single_stage(journey_id, job_id, stage_id)
+                total_items_processed += int(metrics.get('items_processed', 0))
+                total_items_total += int(metrics.get('items_total', 0))
+                combined_metrics.update(metrics.get('detailed_metrics', {}))
+                self._complete_journey_stage(journey_id, job_id, stage_id, stage_index, total_stages)
 
-                    if self.is_job_cancelled(job_id):
-                        self.logger.info(f'🛑 Job {job_id} cancelled after step {step_id}')
-                        raise JobCancelledException(f'Job {job_id} cancelled')
-
-                    self.update_step_results(journey_id, job_id, step_id, step_result)
-
-                    progress = ((step_index + 1) / len(steps)) * 100
-                    self.update_job_progress(journey_id, job_id, progress, step_index + 1)
-
-                    self.logger.info(f'✅ Completed step: {step["name"]} (ID: {step_id})')
-                    
-                except JobCancelledException:
-                    raise
-                except Exception as step_error:
-                    self.logger.error(f'❌ Error in step {step_id}: {str(step_error)}')
-                    self.logger.error(f'Error type: {type(step_error).__name__}')
-                    import traceback
-                    traceback.print_exc()
-                    raise step_error
-
-            # Collect metrics from stage
-            items_processed = 0
-            items_total = 0
-            detailed_metrics = {}
-
-            if stage_id == 'order_to_cash' and hasattr(stage, '_processor'):
-                proc = stage._processor
-                items_total = len(getattr(proc, '_resolved_orders', []))
-                items_processed = len(getattr(proc, '_risk_ranked', []))
-                alerts = getattr(proc, '_alerts', [])
-                detailed_metrics = {
-                    'ordersResolved': items_total,
-                    'ordersRanked': items_processed,
-                    'alertsGenerated': len(alerts) if isinstance(alerts, list) else 0,
-                }
-            elif hasattr(stage, 'metrics'):
-                metrics = stage.metrics
-                if 'process_recordings' in metrics:
-                    items_processed = metrics['process_recordings'].get('processed', 0)
-                if 'fetch_tasks' in metrics:
-                    items_total = metrics['fetch_tasks'].get('tasks_found', 0)
-                if not items_processed and 'crm_actions' in metrics:
-                    items_processed = metrics['crm_actions'].get('calls_considered', 0)
-                if not items_processed and 'processed' in metrics:
-                    items_processed = metrics.get('processed', 0)
-                if not items_total and 'tasks_found' in metrics:
-                    items_total = metrics.get('tasks_found', 0)
-
-                detailed_metrics = {
-                    'availableCalls': metrics.get('fetch_tasks', {}).get('tasks_found', 0),
-                    'newTasks': metrics.get('deduplication', {}).get('new_tasks', 0),
-                    'skippedTasks': metrics.get('deduplication', {}).get('skipped_tasks', 0),
-                    'successfulProcessing': metrics.get('process_recordings', {}).get('processed', 0),
-                    'failedProcessing': metrics.get('process_recordings', {}).get('failed', 0),
-                    'noRecording': metrics.get('process_recordings', {}).get('no_recording', 0),
-                    'transcriptsCollected': metrics.get('process_recordings', {}).get('transcripts_collected', 0),
-                    'analyzed': metrics.get('ai_analysis', {}).get('analyzed', 0),
-                }
-
-            self.complete_job(journey_id, job_id, items_processed, items_total, detailed_metrics)
-            self.logger.info(f'🎉 Job {job_id} completed successfully (processed: {items_processed}/{items_total})')
+            self.complete_job(
+                journey_id,
+                job_id,
+                total_items_processed,
+                total_items_total,
+                combined_metrics,
+            )
+            self.logger.info(f'🎉 Journey job {job_id} completed all {total_stages} stages')
             from ..stages import BaseStage
             BaseStage._last_db_cancel_check.pop(job_id, None)
 
+        except JobCancelledException:
+            self.logger.info(f'🛑 Journey job {job_id} was cancelled')
+            self._cancelled_jobs.discard(job_id)
+            from ..stages import BaseStage
+            BaseStage._last_db_cancel_check.pop(job_id, None)
+        except Exception as e:
+            self.logger.error(f'❌ Journey job {job_id} failed: {str(e)}')
+            self.fail_job(journey_id, job_id, str(e))
+            raise
+
+    def _execute_stage_job(self, journey_id: str, job_id: str, job_data: Dict):
+        """Execute a legacy single-stage job."""
+        stage_id = job_data['stageId']
+        try:
+            metrics = self._execute_single_stage(journey_id, job_id, stage_id)
+            self.complete_job(
+                journey_id,
+                job_id,
+                metrics.get('items_processed', 0),
+                metrics.get('items_total', 0),
+                metrics.get('detailed_metrics'),
+            )
+            self.logger.info(f'🎉 Job {job_id} completed successfully')
+            from ..stages import BaseStage
+            BaseStage._last_db_cancel_check.pop(job_id, None)
         except JobCancelledException:
             self.logger.info(f'🛑 Job {job_id} was cancelled')
             self._cancelled_jobs.discard(job_id)
@@ -318,6 +473,156 @@ class TransformationJobExecutor:
             self.logger.error(f'❌ Error executing job {job_id}: {str(e)}')
             self.fail_job(journey_id, job_id, str(e))
             raise
+
+    def _execute_single_stage(self, journey_id: str, job_id: str, stage_id: str) -> Dict[str, Any]:
+        """Run all steps for one stage; returns aggregated metrics for the stage."""
+        if stage_id not in list_available_stages():
+            raise ValueError(f'Stage {stage_id} not available for execution')
+
+        stage_class = get_stage_class(stage_id)
+        if not stage_class:
+            raise ValueError(f'Stage class not found for stage: {stage_id}')
+
+        stage = stage_class(journey_id, stage_id, job_id, self.region_name, self.role_arn)
+        steps = stage.steps
+
+        self.logger.info(f'🚀 Executing stage {stage_id} in job {job_id} ({len(steps)} steps)')
+
+        for step_index, step in enumerate(steps):
+            step_id = step['id']
+
+            if self.is_job_cancelled(job_id):
+                raise JobCancelledException(f'Job {job_id} cancelled')
+
+            self.logger.info(f'📝 Step {step_index + 1}/{len(steps)}: {step["name"]} ({step_id})')
+
+            try:
+                self.update_step_status(journey_id, job_id, step_id, 'in_progress', step_index, stage_id=stage_id)
+                step_result = stage.execute_step(step_id, step)
+
+                if self.is_job_cancelled(job_id):
+                    raise JobCancelledException(f'Job {job_id} cancelled')
+
+                self.update_step_results(journey_id, job_id, step_id, step_result, stage_id=stage_id)
+                self.update_job_progress(journey_id, job_id, step_index, stage_id, len(steps))
+                self.logger.info(f'✅ Completed step: {step["name"]} ({step_id})')
+
+            except JobCancelledException:
+                raise
+            except Exception as step_error:
+                self.logger.error(f'❌ Error in step {step_id}: {str(step_error)}')
+                raise step_error
+
+        items_processed = 0
+        items_total = 0
+        detailed_metrics: Dict[str, Any] = {}
+
+        if stage_id == 'order_to_cash' and hasattr(stage, '_processor'):
+            proc = stage._processor
+            items_total = len(getattr(proc, '_resolved_orders', []))
+            items_processed = len(getattr(proc, '_risk_ranked', []))
+            alerts = getattr(proc, '_alerts', [])
+            detailed_metrics = {
+                'ordersResolved': items_total,
+                'ordersRanked': items_processed,
+                'alertsGenerated': len(alerts) if isinstance(alerts, list) else 0,
+            }
+        elif hasattr(stage, 'metrics'):
+            metrics = stage.metrics
+            if 'process_recordings' in metrics:
+                items_processed = metrics['process_recordings'].get('processed', 0)
+            if 'fetch_tasks' in metrics:
+                items_total = metrics['fetch_tasks'].get('tasks_found', 0)
+            if not items_processed and 'crm_actions' in metrics:
+                items_processed = metrics['crm_actions'].get('calls_considered', 0)
+            if not items_processed and 'processed' in metrics:
+                items_processed = metrics.get('processed', 0)
+            if not items_total and 'tasks_found' in metrics:
+                items_total = metrics.get('tasks_found', 0)
+            detailed_metrics = {
+                'availableCalls': metrics.get('fetch_tasks', {}).get('tasks_found', 0),
+                'newTasks': metrics.get('deduplication', {}).get('new_tasks', 0),
+                'skippedTasks': metrics.get('deduplication', {}).get('skipped_tasks', 0),
+                'successfulProcessing': metrics.get('process_recordings', {}).get('processed', 0),
+                'failedProcessing': metrics.get('process_recordings', {}).get('failed', 0),
+                'noRecording': metrics.get('process_recordings', {}).get('no_recording', 0),
+                'transcriptsCollected': metrics.get('process_recordings', {}).get('transcripts_collected', 0),
+                'analyzed': metrics.get('ai_analysis', {}).get('analyzed', 0),
+            }
+
+        return {
+            'items_processed': items_processed,
+            'items_total': items_total,
+            'detailed_metrics': detailed_metrics,
+        }
+
+    def _set_journey_current_stage(
+        self, journey_id: str, job_id: str, stage_id: str, stage_index: int, stage_info: Dict
+    ):
+        """Switch active stage context on a journey-level job."""
+        job_data = self.get_job_execution(journey_id, job_id)
+        if not job_data:
+            return
+        sk = self._job_sk(job_data, job_id)
+        steps = stage_info.get('steps', [])
+        stage_results = job_data.get('stageResults', {})
+        stage_entry = stage_results.get(stage_id, {})
+        step_results = stage_entry.get('stepResults') or {
+            step['id']: {'status': 'pending', 'progress': Decimal('0')} for step in steps
+        }
+
+        self.table.update_item(
+            Key={'PK': self._get_journey_pk(journey_id), 'SK': sk},
+            UpdateExpression=(
+                'SET #data.currentStageId = :stage_id, #data.currentStageIndex = :stage_index, '
+                '#data.stageId = :stage_id, #data.stepResults = :step_results, '
+                '#data.currentStepIndex = :zero, #data.currentStepId = :first_step, '
+                '#data.stageResults.#stage_id.#status = :running, #data.updatedAt = :updated_at'
+            ),
+            ExpressionAttributeNames={
+                '#data': 'Data',
+                '#stage_id': stage_id,
+                '#status': 'status',
+            },
+            ExpressionAttributeValues={
+                ':stage_id': stage_id,
+                ':stage_index': stage_index,
+                ':step_results': self._convert_floats_to_decimal(step_results),
+                ':zero': 0,
+                ':first_step': steps[0]['id'] if steps else None,
+                ':running': 'in_progress',
+                ':updated_at': datetime.utcnow().isoformat() + 'Z',
+            },
+        )
+
+    def _complete_journey_stage(
+        self, journey_id: str, job_id: str, stage_id: str, stage_index: int, total_stages: int
+    ):
+        """Mark a stage complete inside a journey job and update overall progress."""
+        job_data = self.get_job_execution(journey_id, job_id)
+        if not job_data:
+            return
+        sk = self._job_sk(job_data, job_id)
+        overall = ((stage_index + 1) / total_stages) * 100
+        self.table.update_item(
+            Key={'PK': self._get_journey_pk(journey_id), 'SK': sk},
+            UpdateExpression=(
+                'SET #data.stageResults.#stage_id.#status = :completed, '
+                '#data.progress = :progress, #data.jobMetrics.overallProgress = :progress, '
+                '#data.updatedAt = :updated_at'
+            ),
+            ExpressionAttributeNames={
+                '#data': 'Data',
+                '#stage_id': stage_id,
+                '#status': 'status',
+            },
+            ExpressionAttributeValues={
+                ':completed': 'completed',
+                ':progress': Decimal(str(overall)),
+                ':updated_at': datetime.utcnow().isoformat() + 'Z',
+            },
+        )
+        self.update_journey_stage_summary(journey_id, stage_id, 'completed')
 
     def get_available_stages(self) -> List[str]:
         """Get list of available stage implementations"""
@@ -497,29 +802,38 @@ class TransformationJobExecutor:
             self.logger.error(f'Error updating journey current job: {str(e)}')
 
     def update_step_status(
-        self, journey_id: str, job_id: str, step_id: str, status: str, step_index: int
+        self, journey_id: str, job_id: str, step_id: str, status: str, step_index: int,
+        stage_id: Optional[str] = None,
     ):
         """Update step status in job record and emit SSE event"""
         try:
-            # First, get the job to find the correct SK
             job_data = self.get_job_execution(journey_id, job_id)
             if not job_data:
                 raise Exception(f'Job {job_id} not found')
 
-            # Build the SK from job data
-            stage_id = job_data['stageId']
-            execution_number = job_data['executionNumber']
-            timestamp = job_id.split('-')[-1]  # Extract timestamp from job_id
-            sk = f'JOB#{int(job_data["stageOrder"]):02d}#{stage_id}#{int(execution_number):03d}#{timestamp}'
+            active_stage_id = stage_id or job_data.get('currentStageId') or job_data['stageId']
+            sk = self._job_sk(job_data, job_id)
+
+            update_expr = (
+                'SET #data.stepResults.#step_id.#status = :status, '
+                '#data.currentStepIndex = :step_index, #data.currentStepId = :step_id, '
+                '#data.updatedAt = :updated_at'
+            )
+            expr_names = {
+                '#data': 'Data',
+                '#step_id': step_id,
+                '#status': 'status',
+            }
+            if job_data.get('jobType') == 'journey':
+                update_expr += (
+                    ', #data.stageResults.#stage_id.stepResults.#step_id.#status = :status'
+                )
+                expr_names['#stage_id'] = active_stage_id
 
             self.table.update_item(
                 Key={'PK': self._get_journey_pk(journey_id), 'SK': sk},
-                UpdateExpression='SET #data.stepResults.#step_id.#status = :status, #data.currentStepIndex = :step_index, #data.currentStepId = :step_id, #data.updatedAt = :updated_at',
-                ExpressionAttributeNames={
-                    '#data': 'Data',
-                    '#step_id': step_id,
-                    '#status': 'status',
-                },
+                UpdateExpression=update_expr,
+                ExpressionAttributeNames=expr_names,
                 ExpressionAttributeValues={
                     ':status': status,
                     ':step_index': step_index,
@@ -527,45 +841,44 @@ class TransformationJobExecutor:
                     ':updated_at': datetime.utcnow().isoformat() + 'Z',
                 },
             )
-            
-            # Emit SSE event for real-time UI updates
+
             emit_step_status(
                 job_id=job_id,
                 step_id=step_id,
                 status=status,
                 step_index=step_index,
                 progress=0 if status == 'in_progress' else 100 if status == 'completed' else 0,
-                message=f"Step {step_id} {status}"
+                message=f"Step {step_id} {status}",
+                stage_id=active_stage_id,
             )
-            self.logger.debug(f'📡 SSE event emitted: step_status for {step_id} -> {status}')
             
         except Exception as e:
             self.logger.error(f'Error updating step status: {str(e)}')
 
-    def update_step_results(self, journey_id: str, job_id: str, step_id: str, step_result: Dict):
+    def update_step_results(
+        self, journey_id: str, job_id: str, step_id: str, step_result: Dict,
+        stage_id: Optional[str] = None,
+    ):
         """Update step results in job record"""
         try:
-            # Get job data to find correct SK
             job_data = self.get_job_execution(journey_id, job_id)
             if not job_data:
                 raise Exception(f'Job {job_id} not found')
 
-            # Build the SK
-            stage_id = job_data['stageId']
-            execution_number = job_data['executionNumber']
-            timestamp = job_id.split('-')[-1]
-            sk = f'JOB#{int(job_data["stageOrder"]):02d}#{stage_id}#{int(execution_number):03d}#{timestamp}'
-
-            # Convert float values to Decimal for DynamoDB compatibility
+            active_stage_id = stage_id or job_data.get('currentStageId') or job_data['stageId']
+            sk = self._job_sk(job_data, job_id)
             step_result_converted = self._convert_floats_to_decimal(step_result)
+
+            update_expr = 'SET #data.stepResults.#step_id = :step_result, #data.updatedAt = :updated_at'
+            expr_names = {'#data': 'Data', '#step_id': step_id}
+            if job_data.get('jobType') == 'journey':
+                update_expr += ', #data.stageResults.#stage_id.stepResults.#step_id = :step_result'
+                expr_names['#stage_id'] = active_stage_id
 
             self.table.update_item(
                 Key={'PK': self._get_journey_pk(journey_id), 'SK': sk},
-                UpdateExpression='SET #data.stepResults.#step_id = :step_result, #data.updatedAt = :updated_at',
-                ExpressionAttributeNames={
-                    '#data': 'Data',
-                    '#step_id': step_id,
-                },
+                UpdateExpression=update_expr,
+                ExpressionAttributeNames=expr_names,
                 ExpressionAttributeValues={
                     ':step_result': step_result_converted,
                     ':updated_at': datetime.utcnow().isoformat() + 'Z',
@@ -586,20 +899,29 @@ class TransformationJobExecutor:
             return obj
 
     def update_job_progress(
-        self, journey_id: str, job_id: str, progress: float, current_step_index: int
+        self,
+        journey_id: str,
+        job_id: str,
+        step_index: int,
+        stage_id: Optional[str] = None,
+        stage_step_count: Optional[int] = None,
     ):
         """Update job progress"""
         try:
-            # Get job data to find correct SK
             job_data = self.get_job_execution(journey_id, job_id)
             if not job_data:
                 raise Exception(f'Job {job_id} not found')
 
-            # Build the SK
-            stage_id = job_data['stageId']
-            execution_number = job_data['executionNumber']
-            timestamp = job_id.split('-')[-1]
-            sk = f'JOB#{int(job_data["stageOrder"]):02d}#{stage_id}#{int(execution_number):03d}#{timestamp}'
+            sk = self._job_sk(job_data, job_id)
+            if job_data.get('jobType') == 'journey' and stage_step_count:
+                total_stages = len(job_data.get('stageIds') or [])
+                current_stage_index = int(job_data.get('currentStageIndex', 0))
+                stage_progress = (step_index + 1) / stage_step_count
+                progress = ((current_stage_index + stage_progress) / max(total_stages, 1)) * 100
+            elif stage_step_count:
+                progress = ((step_index + 1) / stage_step_count) * 100
+            else:
+                progress = float(job_data.get('progress', 0))
 
             self.table.update_item(
                 Key={'PK': self._get_journey_pk(journey_id), 'SK': sk},
@@ -607,7 +929,7 @@ class TransformationJobExecutor:
                 ExpressionAttributeNames={'#data': 'Data'},
                 ExpressionAttributeValues={
                     ':progress': Decimal(str(progress)),
-                    ':step_index': current_step_index,
+                    ':step_index': step_index,
                     ':updated_at': datetime.utcnow().isoformat() + 'Z',
                 },
             )
@@ -621,10 +943,8 @@ class TransformationJobExecutor:
             if not job_data:
                 raise Exception(f'Job {job_id} not found')
 
-            stage_id = job_data['stageId']
-            execution_number = job_data['executionNumber']
-            timestamp = job_id.split('-')[-1]
-            sk = f'JOB#{int(job_data["stageOrder"]):02d}#{stage_id}#{int(execution_number):03d}#{timestamp}'
+            sk = self._job_sk(job_data, job_id)
+            stage_id = job_data.get('currentStageId') or job_data['stageId']
 
             from datetime import timezone
             start_time = datetime.fromisoformat(job_data['startTime'].replace('Z', '+00:00'))
@@ -663,10 +983,11 @@ class TransformationJobExecutor:
                 },
             )
 
-            # Update journey aggregates
-            self.update_journey_aggregates(journey_id, stage_id, 'completed')
+            if job_data.get('jobType') == 'journey':
+                self.update_journey_aggregates(journey_id, stage_id, 'completed')
+            else:
+                self.update_journey_aggregates(journey_id, stage_id, 'completed')
             
-            # Emit SSE event for job completion
             emit_job_complete(
                 job_id=job_id,
                 status='completed',
@@ -674,7 +995,6 @@ class TransformationJobExecutor:
                 items_processed=items_processed,
                 items_total=items_total
             )
-            self.logger.info(f'📡 SSE event emitted: job_complete for {job_id}')
 
         except Exception as e:
             self.logger.error(f'Error completing job: {str(e)}')
@@ -682,37 +1002,37 @@ class TransformationJobExecutor:
     def fail_job(self, journey_id: str, job_id: str, error_message: str):
         """Mark job as failed"""
         try:
-            # Get job data
             job_data = self.get_job_execution(journey_id, job_id)
             if not job_data:
                 raise Exception(f'Job {job_id} not found')
 
-            # Build the SK
-            stage_id = job_data['stageId']
-            execution_number = job_data['executionNumber']
-            timestamp = job_id.split('-')[-1]
-            sk = f'JOB#{int(job_data["stageOrder"]):02d}#{stage_id}#{int(execution_number):03d}#{timestamp}'
+            sk = self._job_sk(job_data, job_id)
+            stage_id = job_data.get('currentStageId') or job_data['stageId']
 
-            # Update job record
+            update_expr = (
+                'SET #data.#status = :status, #data.endTime = :end_time, '
+                '#data.errorMessage = :error_message, #data.updatedAt = :updated_at'
+            )
+            expr_names = {'#data': 'Data', '#status': 'status'}
+            if job_data.get('jobType') == 'journey':
+                update_expr += ', #data.stageResults.#stage_id.#status = :failed'
+                expr_names['#stage_id'] = stage_id
+
             self.table.update_item(
                 Key={'PK': self._get_journey_pk(journey_id), 'SK': sk},
-                UpdateExpression='SET #data.#status = :status, #data.endTime = :end_time, #data.errorMessage = :error_message, #data.updatedAt = :updated_at',
-                ExpressionAttributeNames={
-                    '#data': 'Data',
-                    '#status': 'status',
-                },
+                UpdateExpression=update_expr,
+                ExpressionAttributeNames=expr_names,
                 ExpressionAttributeValues={
                     ':status': 'failed',
+                    ':failed': 'failed',
                     ':end_time': datetime.utcnow().isoformat() + 'Z',
                     ':error_message': error_message,
                     ':updated_at': datetime.utcnow().isoformat() + 'Z',
                 },
             )
 
-            # Update journey aggregates
             self.update_journey_aggregates(journey_id, stage_id, 'failed')
             
-            # Emit SSE event for job failure
             emit_job_complete(
                 job_id=job_id,
                 status='failed',
@@ -720,10 +1040,37 @@ class TransformationJobExecutor:
                 items_processed=0,
                 items_total=0
             )
-            self.logger.info(f'📡 SSE event emitted: job_complete (failed) for {job_id}')
+
+            self._write_to_dlq(
+                job_id=job_id,
+                journey_id=journey_id,
+                stage_id=stage_id,
+                error=error_message,
+            )
 
         except Exception as e:
             self.logger.error(f'Error failing job: {str(e)}')
+
+    def update_journey_stage_summary(self, journey_id: str, stage_id: str, status: str):
+        """Update per-stage last status without incrementing job counters (mid-journey)."""
+        try:
+            self.table.update_item(
+                Key={'PK': self._get_journey_pk(journey_id), 'SK': 'METADATA'},
+                UpdateExpression=(
+                    'SET #data.stageSummary = if_not_exists(#data.stageSummary, :empty_map), '
+                    '#data.stageSummary.#stage_id = if_not_exists(#data.stageSummary.#stage_id, :empty_stage), '
+                    '#data.stageSummary.#stage_id.lastStatus = :status, #data.updatedAt = :updated_at'
+                ),
+                ExpressionAttributeNames={'#data': 'Data', '#stage_id': stage_id},
+                ExpressionAttributeValues={
+                    ':empty_map': {},
+                    ':empty_stage': {'totalExecutions': 0, 'lastStatus': 'pending'},
+                    ':status': status,
+                    ':updated_at': datetime.utcnow().isoformat() + 'Z',
+                },
+            )
+        except Exception as e:
+            self.logger.error(f'Error updating stage summary: {str(e)}')
 
     def update_journey_aggregates(self, journey_id: str, stage_id: str, status: str):
         """Update journey aggregate statistics"""

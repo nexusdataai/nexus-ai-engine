@@ -65,3 +65,22 @@ html.light {
     min-height: 100vh;
   }
 }
+
+/* react-day-picker — align with app theme */
+.rdp {
+  --rdp-cell-size: 2.25rem;
+  --rdp-accent-color: hsl(var(--primary));
+  --rdp-background-color: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+.rdp-day_selected,
+.rdp-day_selected:focus-visible,
+.rdp-day_selected:hover {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+.rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
+  background-color: hsl(var(--accent));
+}

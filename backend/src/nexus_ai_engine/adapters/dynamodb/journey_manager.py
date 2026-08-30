@@ -261,6 +261,13 @@ class ComprehensiveJourneyManager:
             if component_type_filter and journey_data.get("odaComponentType") != component_type_filter:
                 continue
             aggregates = journey_data.get("aggregates", {})
+            current_jobs = journey_data.get("currentJobs") or {}
+            running_jobs = sum(
+                1
+                for info in current_jobs.values()
+                if isinstance(info, dict)
+                and info.get("status") in ("running", "in_progress")
+            )
             journeys.append(
                 {
                     "journeyId": journey_data.get("journeyId"),
@@ -279,6 +286,7 @@ class ComprehensiveJourneyManager:
                     "totalJobs": aggregates.get("totalJobs", 0),
                     "completedJobs": aggregates.get("completedJobs", 0),
                     "failedJobs": aggregates.get("failedJobs", 0),
+                    "runningJobs": running_jobs,
                 }
             )
         return journeys
@@ -1564,8 +1572,11 @@ class ComprehensiveJourneyManager:
                 metrics = job_data.get('metrics', {})
                 jobs.append({
                     'jobId': job_data.get('jobId'),
+                    'jobType': job_data.get('jobType', 'stage'),
                     'stageId': job_data.get('stageId'),
+                    'stageIds': job_data.get('stageIds', []),
                     'stageName': job_data.get('stageName'),
+                    'currentStageId': job_data.get('currentStageId'),
                     'status': job_data.get('status'),
                     'triggeredBy': job_data.get('triggeredBy'),
                     'reason': job_data.get('reason'),
@@ -1616,8 +1627,11 @@ class ComprehensiveJourneyManager:
             
             return {
                 'jobId': job_data.get('jobId'),
+                'jobType': job_data.get('jobType', 'stage'),
                 'journeyId': clean_id,
                 'stageId': job_data.get('stageId'),
+                'stageIds': job_data.get('stageIds', []),
+                'currentStageId': job_data.get('currentStageId'),
                 'stageName': job_data.get('stageName'),
                 'stageOrder': job_data.get('stageOrder'),
                 'executionNumber': job_data.get('executionNumber'),
@@ -1632,6 +1646,7 @@ class ComprehensiveJourneyManager:
                 'currentStepIndex': job_data.get('currentStepIndex'),
                 'totalSteps': len(job_data.get('stepResults', {})),
                 'stepResults': job_data.get('stepResults', {}),
+                'stageResults': job_data.get('stageResults', {}),
                 'executionDetails': job_data.get('executionDetails', {}),
                 'retryAttempt': job_data.get('retryAttempt', 0),
                 's3Config': job_data.get('s3Config', {}),
@@ -1886,6 +1901,11 @@ class ComprehensiveJourneyManager:
             # Calculate detailed metrics
             execution_metrics = {
                 'jobId': job_id,
+                'jobType': job.get('jobType', 'stage'),
+                'stageIds': job.get('stageIds', []),
+                'currentStageId': job.get('currentStageId'),
+                'stageName': job.get('stageName'),
+                'stageResults': job.get('stageResults', {}),
                 'stageId': job['stageId'],
                 'status': job['status'],
                 'progress': job.get('progress', 0),
@@ -2066,6 +2086,120 @@ class ComprehensiveJourneyManager:
         except Exception as e:
             print_with_flush(f'❌ Error in batch cancel operation: {str(e)}')
             return {job_id: False for job_id in job_ids}
+
+    def _delete_query_items(self, pk: str, sk_prefix: Optional[str] = None) -> int:
+        """Delete all DynamoDB items matching PK and optional SK prefix."""
+        items_deleted = 0
+        if sk_prefix:
+            query_kwargs = {
+                'KeyConditionExpression': 'PK = :pk AND begins_with(SK, :sk)',
+                'ExpressionAttributeValues': {
+                    ':pk': pk,
+                    ':sk': sk_prefix,
+                },
+            }
+        else:
+            query_kwargs = {
+                'KeyConditionExpression': 'PK = :pk',
+                'ExpressionAttributeValues': {
+                    ':pk': pk,
+                },
+            }
+        while True:
+            response = self.table.query(**query_kwargs)
+            for item in response.get('Items', []):
+                self.table.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+                items_deleted += 1
+            last_key = response.get('LastEvaluatedKey')
+            if not last_key:
+                break
+            query_kwargs['ExclusiveStartKey'] = last_key
+        return items_deleted
+
+    def _delete_s3_prefix(self, s3_client, bucket: str, prefix: str) -> int:
+        """Delete all S3 objects under a prefix."""
+        deleted = 0
+        paginator = s3_client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+            contents = page.get('Contents', [])
+            if not contents:
+                continue
+            keys = [{'Key': obj['Key']} for obj in contents]
+            for i in range(0, len(keys), 1000):
+                batch = keys[i:i + 1000]
+                s3_client.delete_objects(Bucket=bucket, Delete={'Objects': batch})
+                deleted += len(batch)
+        return deleted
+
+    def delete_job(self, journey_id: str, job_id: str) -> Dict[str, Any]:
+        """Delete a finished job and its DynamoDB records plus S3 logs/reports."""
+        try:
+            clean_id = self.clean_journey_id(journey_id)
+            job_details = self.get_job_details(clean_id, job_id)
+            if not job_details:
+                return {'success': False, 'error': 'Job not found', 'job_id': job_id}
+
+            status = (job_details.get('status') or '').lower()
+            if status in ('running', 'pending', 'in_progress'):
+                return {
+                    'success': False,
+                    'error': f'Cannot delete job with status: {status}',
+                    'job_id': job_id,
+                }
+
+            stage_id = job_details.get('stageId')
+            stage_ids = job_details.get('stageIds') or ([stage_id] if stage_id else [])
+            journey_pk = f'JOURNEY#{clean_id}'
+            items_deleted = 0
+            s3_deleted = 0
+
+            response = self.table.query(
+                KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
+                FilterExpression='#data.jobId = :job_id',
+                ExpressionAttributeNames={'#data': 'Data'},
+                ExpressionAttributeValues={
+                    ':pk': journey_pk,
+                    ':sk': 'JOB#',
+                    ':job_id': job_id,
+                },
+            )
+            for item in response.get('Items', []):
+                self.table.delete_item(Key={'PK': item['PK'], 'SK': item['SK']})
+                items_deleted += 1
+
+            items_deleted += self._delete_query_items(journey_pk, f'LOG#{job_id}')
+            items_deleted += self._delete_query_items(journey_pk, f'REPORT#{job_id}')
+            items_deleted += self._delete_query_items(f'LIVELOG#{job_id}')
+
+            if stage_ids:
+                s3_client = self.setup_s3_client()
+                logs_bucket = getattr(self, 'logs_bucket', 'transformation-journey-logs')
+                reports_bucket = getattr(self, 'reports_bucket', 'transformation-journey-reports')
+                for sid in stage_ids:
+                    exec_prefix = f'journeys/{clean_id}/stages/{sid}/executions/{job_id}/'
+                    s3_deleted += self._delete_s3_prefix(s3_client, logs_bucket, exec_prefix)
+                    s3_deleted += self._delete_s3_prefix(s3_client, reports_bucket, exec_prefix)
+
+            print_with_flush(
+                f'✅ Job deleted: {job_id} ({items_deleted} DynamoDB items, {s3_deleted} S3 objects)'
+            )
+            return {
+                'success': True,
+                'job_id': job_id,
+                'dynamo_items_deleted': items_deleted,
+                's3_objects_deleted': s3_deleted,
+            }
+
+        except Exception as e:
+            print_with_flush(f'❌ Error deleting job: {str(e)}')
+            return {'success': False, 'error': str(e), 'job_id': job_id}
+
+    def batch_delete_jobs(self, journey_id: str, job_ids: List[str]) -> Dict[str, Any]:
+        """Delete multiple finished jobs for a journey."""
+        results = {job_id: self.delete_job(journey_id, job_id) for job_id in job_ids}
+        successful = sum(1 for result in results.values() if result.get('success'))
+        print_with_flush(f'✅ Batch delete completed: {successful}/{len(job_ids)} jobs deleted')
+        return {'results': results, 'successful': successful, 'total': len(job_ids)}
     
     # ==========================================
     # LOGS AND REPORTS MANAGEMENT

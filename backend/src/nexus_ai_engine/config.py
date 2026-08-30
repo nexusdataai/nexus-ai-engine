@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Literal, Optional
 
 
 @dataclass(frozen=True)
@@ -47,6 +47,15 @@ class EngineConfig:
 
     max_concurrent_jobs: int = 10
     job_task_cleanup_interval_seconds: int = 60
+
+    redis_url: Optional[str] = None
+    job_stream_key: str = "ai-engine:jobs"
+    job_consumer_group: str = "ai-engine-workers"
+    job_active_counter_key: str = "ai-engine:jobs:active"
+    job_execution_mode: Literal["inline", "queue"] = "inline"
+    max_global_jobs: int = 10
+    sse_redis_enabled: bool = True
+    job_worker_health_port: int = 8081
 
     capability_name: str = "ai-engine"
     environment: str = "dev"
@@ -122,6 +131,16 @@ def config_from_environment() -> EngineConfig:
             or rn.s3_bucket_name("journey-reports", capability=cap, environment=env)
         ),
         max_concurrent_jobs=int(os.getenv("MAX_CONCURRENT_JOBS", "10")),
+        redis_url=os.getenv("REDIS_URL"),
+        job_stream_key=os.getenv("JOB_STREAM_KEY", "ai-engine:jobs"),
+        job_consumer_group=os.getenv("JOB_CONSUMER_GROUP", "ai-engine-workers"),
+        job_active_counter_key=os.getenv("JOB_ACTIVE_COUNTER_KEY", "ai-engine:jobs:active"),
+        job_execution_mode=(
+            "queue" if os.getenv("JOB_EXECUTION_MODE", "inline").lower() == "queue" else "inline"
+        ),
+        max_global_jobs=int(os.getenv("MAX_GLOBAL_JOBS", os.getenv("MAX_CONCURRENT_JOBS", "10"))),
+        sse_redis_enabled=os.getenv("SSE_REDIS_ENABLED", "true").lower() not in ("0", "false", "no"),
+        job_worker_health_port=int(os.getenv("JOB_WORKER_HEALTH_PORT", "8081")),
         capability_name=cap,
         environment=env,
     )

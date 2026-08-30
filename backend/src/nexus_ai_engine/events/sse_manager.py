@@ -13,6 +13,7 @@ Memory-safety: Uses bounded queues with size limits and automatic stale connecti
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 import queue as thread_queue
@@ -22,6 +23,18 @@ from enum import Enum
 from typing import Any, AsyncGenerator, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
+
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis-svc:6379/0")
+SSE_HISTORY_MAX = int(os.getenv("SSE_HISTORY_MAX", "100"))
+SSE_REDIS_ENABLED = os.getenv("SSE_REDIS_ENABLED", "true").lower() in ("1", "true", "yes")
+
+try:
+    import redis as redis_sync
+
+    REDIS_AVAILABLE = True
+except ImportError:
+    redis_sync = None  # type: ignore
+    REDIS_AVAILABLE = False
 
 # Configuration constants for memory safety
 MAX_QUEUE_SIZE = 100  # Maximum events per subscriber queue
@@ -86,7 +99,104 @@ class SSEManager:
         self._lock = threading.Lock()  # Thread-safe lock (not asyncio.Lock)
         self._cleanup_task = None
         self._next_conn_id = 0
+        self._redis_client = None
+        self._redis_publish_only = False
+        self._redis_listener_threads: Dict[str, threading.Thread] = {}
         logger.info("SSEManager initialized (thread-safe mode with memory limits)")
+
+    def _redis_channel(self, job_id: str) -> str:
+        return f"sse:job:{job_id}"
+
+    def _redis_history_key(self, job_id: str) -> str:
+        return f"sse:job:{job_id}:history"
+
+    def _get_redis(self):
+        if not REDIS_AVAILABLE or not SSE_REDIS_ENABLED:
+            return None
+        if self._redis_client is None:
+            self._redis_client = redis_sync.from_url(REDIS_URL, decode_responses=True)
+        return self._redis_client
+
+    def enable_redis_bridge(self, publish_only: bool = False) -> None:
+        """Workers publish-only; API pods subscribe and relay to SSE clients."""
+        self._redis_publish_only = publish_only
+        self._get_redis()
+
+    def _publish_to_redis(self, job_id: str, event: JobEvent) -> None:
+        client = self._get_redis()
+        if client is None:
+            return
+        payload = json.dumps(
+            {
+                "event_type": event.event_type.value,
+                "data": event.data,
+                "timestamp": event.timestamp,
+            }
+        )
+        try:
+            pipe = client.pipeline()
+            pipe.publish(self._redis_channel(job_id), payload)
+            pipe.lpush(self._redis_history_key(job_id), payload)
+            pipe.ltrim(self._redis_history_key(job_id), 0, SSE_HISTORY_MAX - 1)
+            pipe.execute()
+        except Exception as exc:
+            logger.warning("Redis SSE publish failed for job %s: %s", job_id, exc)
+
+    def _replay_history(self, job_id: str, event_queue: thread_queue.Queue) -> None:
+        client = self._get_redis()
+        if client is None:
+            return
+        try:
+            items = client.lrange(self._redis_history_key(job_id), 0, SSE_HISTORY_MAX - 1)
+            for raw in reversed(items or []):
+                parsed = json.loads(raw)
+                event = JobEvent(
+                    event_type=EventType(parsed["event_type"]),
+                    data=parsed.get("data") or {},
+                    timestamp=parsed.get("timestamp") or datetime.utcnow().isoformat() + "Z",
+                )
+                try:
+                    event_queue.put_nowait(event)
+                except thread_queue.Full:
+                    break
+        except Exception as exc:
+            logger.debug("SSE history replay failed for %s: %s", job_id, exc)
+
+    def _ensure_redis_listener(self, job_id: str, event_queue: thread_queue.Queue) -> None:
+        if self._redis_publish_only:
+            return
+        with self._lock:
+            if job_id in self._redis_listener_threads:
+                return
+
+            def _listen():
+                client = self._get_redis()
+                if client is None:
+                    return
+                pubsub = client.pubsub(ignore_subscribe_messages=True)
+                pubsub.subscribe(self._redis_channel(job_id))
+                for message in pubsub.listen():
+                    if message.get("type") != "message":
+                        continue
+                    try:
+                        parsed = json.loads(message["data"])
+                        event = JobEvent(
+                            event_type=EventType(parsed["event_type"]),
+                            data=parsed.get("data") or {},
+                            timestamp=parsed.get("timestamp")
+                            or datetime.utcnow().isoformat() + "Z",
+                        )
+                        event_queue.put_nowait(event)
+                    except Exception:
+                        continue
+
+            thread = threading.Thread(
+                target=_listen,
+                name=f"sse-redis-{job_id[:12]}",
+                daemon=True,
+            )
+            self._redis_listener_threads[job_id] = thread
+            thread.start()
     
     def _get_next_conn_id(self) -> int:
         """Get next unique connection ID."""
@@ -166,6 +276,9 @@ class SSEManager:
             subscriber_count = len(self._connections[job_id])
         
         logger.info(f"📡 SSE subscriber connected for job {job_id} (total: {subscriber_count})")
+
+        self._replay_history(job_id, event_queue)
+        self._ensure_redis_listener(job_id, event_queue)
         
         # Send initial connection event
         yield JobEvent(
@@ -217,6 +330,8 @@ class SSEManager:
                         logger.info(f"📡 All SSE subscribers disconnected for job {job_id}")
                     else:
                         logger.info(f"📡 SSE subscriber disconnected for job {job_id} (remaining: {len(self._connections[job_id])})")
+            if job_id not in self._connections:
+                self._redis_listener_threads.pop(job_id, None)
     
     async def broadcast(self, job_id: str, event: JobEvent) -> int:
         """
@@ -279,13 +394,12 @@ class SSEManager:
             job_id: The job ID to broadcast to
             event: The event to broadcast
         """
-        # Check if we have subscribers first (fast path)
+        self._publish_to_redis(job_id, event)
+
         with self._lock:
             if job_id not in self._connections or not self._connections[job_id]:
-                logger.debug(f"No SSE subscribers for job {job_id}, skipping broadcast")
                 return
         
-        # Directly put event in thread-safe queues
         sent = self._broadcast_internal(job_id, event)
         if sent > 0:
             logger.info(f"📡 SSE sync broadcast: {event.event_type.value} to {sent} subscribers for job {job_id}")
@@ -378,29 +492,35 @@ sse_manager = SSEManager()
 
 
 # Convenience functions for common events
-def emit_step_status(job_id: str, step_id: str, status: str, step_index: int, progress: int = 0, message: str = None):
+def emit_step_status(job_id: str, step_id: str, status: str, step_index: int, progress: int = 0, message: str = None, stage_id: str = None):
     """Emit a step status change event"""
+    data = {
+        "step_id": step_id,
+        "status": status,
+        "step_index": step_index,
+        "progress": progress,
+        "message": message,
+    }
+    if stage_id:
+        data["stage_id"] = stage_id
     sse_manager.broadcast_sync(job_id, JobEvent(
         event_type=EventType.STEP_STATUS,
-        data={
-            "step_id": step_id,
-            "status": status,
-            "step_index": step_index,
-            "progress": progress,
-            "message": message
-        }
+        data=data,
     ))
 
 
-def emit_log(job_id: str, step_id: str, level: str, message: str):
+def emit_log(job_id: str, step_id: str, level: str, message: str, stage_id: str = None):
     """Emit a log entry event"""
+    data = {
+        "step_id": step_id,
+        "level": level.lower(),
+        "message": message,
+    }
+    if stage_id:
+        data["stage_id"] = stage_id
     sse_manager.broadcast_sync(job_id, JobEvent(
         event_type=EventType.LOG,
-        data={
-            "step_id": step_id,
-            "level": level.lower(),
-            "message": message
-        }
+        data=data,
     ))
 
 

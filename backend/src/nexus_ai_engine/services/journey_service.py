@@ -1427,26 +1427,58 @@ class JourneyService:
             )
     
     async def run_job(self, request: JourneyActionRequest) -> JourneyResponse:
-        """Execute a transformation job for a specific stage (async - returns immediately)"""
+        """Execute a journey-level job (all stages) or a single stage job."""
         try:
             journey_id = request.journey_id
             stage_id = request.stage_id
             triggered_by = request.triggered_by or 'system'
             reason = request.reason or 'Automated execution via MCP'
+
+            from .job_queue_service import (
+                enqueue_job,
+                get_active_job_count,
+                get_max_global_jobs,
+                get_pending_count,
+                is_queue_mode,
+                redis_available,
+            )
+
+            if is_queue_mode():
+                if not redis_available():
+                    return JourneyResponse(
+                        status="error",
+                        message="JOB_EXECUTION_MODE=queue requires REDIS_URL but Redis is unavailable",
+                        operation="run_job",
+                        journey_id=journey_id,
+                        error_code="REDIS_UNAVAILABLE",
+                    )
+                active = get_active_job_count()
+                pending = get_pending_count()
+                max_global = get_max_global_jobs()
+                if active + pending >= max_global:
+                    return JourneyResponse(
+                        status="error",
+                        message=(
+                            f"Maximum global jobs ({max_global}) reached. "
+                            f"Active: {active}, pending: {pending}."
+                        ),
+                        operation="run_job",
+                        journey_id=journey_id,
+                        error_code="CAPACITY_EXCEEDED",
+                        metadata=self.get_job_stats(),
+                    )
+            else:
+                running_count = self.get_running_job_count()
+                if running_count >= MAX_CONCURRENT_JOBS:
+                    return JourneyResponse(
+                        status="error",
+                        message=f"Maximum concurrent jobs ({MAX_CONCURRENT_JOBS}) reached. Currently running: {running_count}. Try again later.",
+                        operation="run_job",
+                        journey_id=journey_id,
+                        error_code="CAPACITY_EXCEEDED",
+                        metadata=self.get_job_stats()
+                    )
             
-            # Check if we can accept more jobs
-            running_count = self.get_running_job_count()
-            if running_count >= MAX_CONCURRENT_JOBS:
-                return JourneyResponse(
-                    status="error",
-                    message=f"Maximum concurrent jobs ({MAX_CONCURRENT_JOBS}) reached. Currently running: {running_count}. Try again later.",
-                    operation="run_job",
-                    journey_id=journey_id,
-                    error_code="CAPACITY_EXCEEDED",
-                    metadata=self.get_job_stats()
-                )
-            
-            # Quick validation: Check if journey exists
             loop = asyncio.get_event_loop()
             journey_exists = await loop.run_in_executor(
                 None,
@@ -1461,47 +1493,83 @@ class JourneyService:
                     journey_id=journey_id,
                     error_code="JOURNEY_NOT_FOUND"
                 )
-            
-            # Quick validation: Check if stage exists for this journey
-            stages = await loop.run_in_executor(
-                None,
-                self.manager.list_stages,
-                journey_id
-            )
-            stage_ids = [s.get('stageId') for s in stages] if stages else []
-            
-            # Also check against available stage implementations
-            from ..stages import list_available_stages
-            available_stages = list_available_stages()
-            
-            if stage_id not in stage_ids and stage_id not in available_stages:
+
+            executor = TransformationJobExecutor()
+
+            if stage_id:
+                stages = await loop.run_in_executor(None, self.manager.list_stages, journey_id)
+                stage_ids = [s.get('stageId') for s in stages] if stages else []
+                from ..stages import list_available_stages
+                available_stages = list_available_stages()
+                if stage_id not in stage_ids and stage_id not in available_stages:
+                    return JourneyResponse(
+                        status="error",
+                        message=f"Stage {stage_id} not found for journey {journey_id}. Available stages: {', '.join(stage_ids or available_stages)}",
+                        operation="run_job",
+                        journey_id=journey_id,
+                        error_code="STAGE_NOT_FOUND"
+                    )
+                job_id = await loop.run_in_executor(
+                    None,
+                    executor.start_job_execution,
+                    journey_id,
+                    stage_id,
+                    triggered_by,
+                    reason,
+                )
+                operation_label = f"stage {stage_id}"
+            else:
+                job_id = await loop.run_in_executor(
+                    None,
+                    executor.start_journey_job_execution,
+                    journey_id,
+                    None,
+                    triggered_by,
+                    reason or 'Journey pipeline execution',
+                )
+                operation_label = "full journey pipeline"
+
+            job_config = getattr(request, 'job_config', None) or {}
+            stage_ids_for_queue: List[str] = []
+            if not stage_id:
+                job_record = await loop.run_in_executor(
+                    None, executor.get_job_execution, journey_id, job_id
+                )
+                if job_record:
+                    stage_ids_for_queue = job_record.get('stageIds') or []
+
+            if is_queue_mode():
+                enqueue_job(
+                    job_id=job_id,
+                    journey_id=journey_id,
+                    job_kind="transformation",
+                    stage_id=stage_id or "",
+                    stage_ids=stage_ids_for_queue,
+                    triggered_by=triggered_by,
+                    reason=reason or "",
+                    job_config=job_config,
+                )
                 return JourneyResponse(
-                    status="error",
-                    message=f"Stage {stage_id} not found for journey {journey_id}. Available stages: {', '.join(stage_ids or available_stages)}",
+                    status="success",
+                    message=f"Job {job_id} queued for {operation_label}.",
                     operation="run_job",
                     journey_id=journey_id,
-                    error_code="STAGE_NOT_FOUND"
+                    job_id=job_id,
+                    data={
+                        "job_id": job_id,
+                        "stage_id": stage_id,
+                        "job_type": "stage" if stage_id else "journey",
+                        "triggered_by": triggered_by,
+                        "status": "queued",
+                        "status_url": f"/api/v1/journeys/{journey_id}/jobs/{job_id}/status",
+                        "stream_url": f"/api/v1/journeys/{journey_id}/jobs/{job_id}/stream",
+                    },
+                    metadata=self.get_job_stats(),
                 )
             
-            # Create executor
-            executor = TransformationJobExecutor()
-            
-            # Start job execution in executor (creates job record, returns job_id)
-            job_id = await loop.run_in_executor(
-                None,
-                executor.start_job_execution,
-                journey_id,
-                stage_id,
-                triggered_by,
-                reason
-            )
-            
-            # Get semaphore for concurrency control
             semaphore = self._get_semaphore()
             
-            # Schedule job execution in background with semaphore control
             async def _run_job_background():
-                """Background task to execute the job with concurrency control"""
                 async with semaphore:
                     try:
                         logger.info(f"Starting job {job_id} (running: {self.get_running_job_count()}/{MAX_CONCURRENT_JOBS})")
@@ -1513,23 +1581,21 @@ class JourneyService:
                         )
                         logger.info(f"Completed job {job_id}")
                     except Exception as e:
-                        # Log error but don't propagate - job status will be updated by executor
                         logger.error(f"Background job execution failed for {job_id}: {e}")
             
-            # Create task and register it for tracking
             task = asyncio.create_task(_run_job_background())
             self._register_task(task, job_id=job_id)
             
-            # Return immediately with job_id - client can poll for status
             return JourneyResponse(
                 status="success",
-                message=f"Job {job_id} started for stage {stage_id}. Poll status endpoint for progress.",
+                message=f"Job {job_id} started for {operation_label}. Poll status endpoint for progress.",
                 operation="run_job",
                 journey_id=journey_id,
                 job_id=job_id,
                 data={
                     "job_id": job_id,
                     "stage_id": stage_id,
+                    "job_type": "stage" if stage_id else "journey",
                     "triggered_by": triggered_by,
                     "status": "running",
                     "status_url": f"/api/v1/journeys/{journey_id}/jobs/{job_id}/status"

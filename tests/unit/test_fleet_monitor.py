@@ -39,3 +39,5 @@ async def test_summary_counts_in_memory() -> None:
     summary = await service.summary()
     assert summary["active"] == 1
     assert summary["queued"] == 0
+    assert summary["dsl_executions_active"] == 1
+    assert summary["stage_jobs_active"] == 0

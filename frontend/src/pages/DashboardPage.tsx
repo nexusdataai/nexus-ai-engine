@@ -4,6 +4,7 @@ import { Activity, AlertTriangle, Clock, PlayCircle, Server, Users } from "lucid
 
 import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
+import { WorkerHealthCardLink, WorkerHealthList } from "@/components/workers/WorkerHealthList";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { api } from "@/services/api";
 import { truncateId } from "@/lib/utils";
@@ -12,7 +13,7 @@ export function DashboardPage() {
   const fleet = useQuery({
     queryKey: ["fleet", "summary"],
     queryFn: () => api.fleetSummary(),
-    refetchInterval: 5_000,
+    refetchInterval: 2_000,
   });
   const metrics = useQuery({
     queryKey: ["fleet", "metrics"],
@@ -45,8 +46,9 @@ export function DashboardPage() {
   const p95 = metrics.data?.tool_dispatch_p95_ms;
   const journeyRows = journeys.data ?? [];
   const journeyJobTotal = journeyRows.reduce((n, j) => n + Number(j.totalJobs ?? 0), 0);
-  const journeyRunning = journeyRows.reduce((n, j) => n + Number(j.runningJobs ?? 0), 0);
   const recent = (recentRuns.data ?? []).slice(0, 8);
+  const stageActive = summary?.stage_jobs_active ?? 0;
+  const stageQueued = summary?.stage_jobs_queued ?? 0;
 
   return (
     <div className="space-y-6">
@@ -76,11 +78,14 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-bold" data-testid="active-execution-count">
-              {fleet.isLoading ? "…" : (summary?.active ?? 0) + journeyRunning}
+              {fleet.isLoading ? "…" : (summary?.active ?? 0)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">
               Limit {summary?.global_limit ?? "—"}
               {summary?.running_counter != null ? ` · counter ${summary.running_counter}` : ""}
+              {stageActive > 0 || (summary?.dsl_executions_active ?? 0) > 0
+                ? ` · ${stageActive} stage · ${summary?.dsl_executions_active ?? 0} DSL`
+                : ""}
             </p>
           </CardContent>
         </Card>
@@ -95,6 +100,11 @@ export function DashboardPage() {
             <p className="text-3xl font-bold" data-testid="queued-execution-count">
               {fleet.isLoading ? "…" : (summary?.queued ?? 0)}
             </p>
+            {(stageQueued > 0 || (summary?.dsl_executions_queued ?? 0) > 0) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {stageQueued} stage · {summary?.dsl_executions_queued ?? 0} DSL
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -157,27 +167,19 @@ export function DashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Server className="h-4 w-4" />
-              Worker health
-            </CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Server className="h-4 w-4" />
+                Worker health
+              </CardTitle>
+              <WorkerHealthCardLink />
+            </div>
           </CardHeader>
           <CardContent>
-            {workers.isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : (workers.data?.workers.length ?? 0) === 0 ? (
-              <EmptyState title="No workers" description="Worker registry is empty." />
-            ) : (
-              <ul className="divide-y divide-border">
-                {workers.data!.workers.map((w) => (
-                  <li key={`${w.worker_id}-${w.role}`} className="py-2 flex items-center justify-between gap-2">
-                    <span className="text-sm font-mono truncate">{w.worker_id}</span>
-                    <span className="text-xs text-muted-foreground">{w.role}</span>
-                    <StatusBadge status={w.status === "healthy" ? "SUCCEEDED" : "FAILED"} />
-                  </li>
-                ))}
-              </ul>
-            )}
+            <WorkerHealthList
+              workers={workers.data?.workers ?? []}
+              loading={workers.isLoading}
+            />
           </CardContent>
         </Card>
       </div>

@@ -27,11 +27,13 @@ from .routers import journey_dsl_api as journey_dsl_router
 from .routers import journeys as journeys_router
 from .routers import logs as logs_router
 from .routers import prompts as prompts_router
+from .routers import queue as queue_router
 from .routers import reports as reports_router
 from .routers import schedules as schedules_router
 from .routers import stages_registry as stages_registry_router
 from .routers import tool_packages as tool_packages_router
 from .routers import ui as ui_router
+from .routers import workers as workers_router
 from .observability import build_metrics_registry
 
 logger = logging.getLogger(__name__)
@@ -48,6 +50,15 @@ def _local_demo_seed_lifespan(engine: Optional[Any]):
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI):
+        from ..events.sse_manager import sse_manager
+        from ..services.stale_job_manager import start_stale_job_sweeper
+
+        sse_manager.enable_redis_bridge(publish_only=False)
+        if engine is not None and hasattr(engine, "execution_runtime"):
+            engine.execution_runtime.sse.enable_redis_bridge(publish_only=False)
+        start_stale_job_sweeper()
+        await sse_manager.start_cleanup_task()
+
         from ..factory import Engine
 
         if isinstance(engine, Engine) and engine.config.environment == "local":
@@ -67,6 +78,7 @@ def _local_demo_seed_lifespan(engine: Optional[Any]):
                 except Exception:
                     logger.exception("Demo journey seed failed on startup")
         yield
+        await sse_manager.stop_cleanup_task()
 
     return _lifespan
 
@@ -133,6 +145,8 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
     app.include_router(ui_router.router, tags=["ui"])
     app.include_router(stages_registry_router.router, tags=["stages"])
     app.include_router(fleet_router.router, prefix=API_V1_PREFIX, tags=["fleet"])
+    app.include_router(queue_router.router, prefix=API_V1_PREFIX, tags=["queue"])
+    app.include_router(workers_router.router, prefix=API_V1_PREFIX, tags=["workers"])
 
     # Engine surface — branch on engine kind. The InMemoryEngine path is the
     # default (no DynamoDB config supplied); the production path activates

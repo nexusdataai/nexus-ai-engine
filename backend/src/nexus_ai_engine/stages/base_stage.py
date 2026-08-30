@@ -158,7 +158,8 @@ class BaseStage(ABC):
                     job_id=self.job_id,
                     step_id=step_id or 'general',
                     level=level.lower(),
-                    message=message
+                    message=message,
+                    stage_id=self.stage_id,
                 )
             except Exception:
                 pass

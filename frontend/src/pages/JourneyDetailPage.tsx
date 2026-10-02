@@ -3,6 +3,8 @@ import { ArrowLeft, Play, RefreshCw, Square } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import { ArchivedJobsSearch } from "@/components/schedules/ArchivedJobsSearch";
+import { BatchSchedulesPanel } from "@/components/schedules/BatchSchedulesPanel";
 import { StepConsole } from "@/components/stage/StepConsole";
 import { WorkflowTree, type SelectedStep } from "@/components/stage/WorkflowTree";
 import { EmptyState } from "@/components/EmptyState";
@@ -502,6 +504,14 @@ export function JourneyDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      <BatchSchedulesPanel
+        journeyId={journey.id}
+        journeyName={journey.name}
+        stages={journey.stages.map((stage) => ({ id: stage.id, name: stage.name }))}
+      />
+
+      <ArchivedJobsSearch />
     </div>
   );
 }

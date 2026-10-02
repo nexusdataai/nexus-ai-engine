@@ -12,12 +12,15 @@ ConfigSource = Literal["env", "default"]
 
 VALID_EXECUTION_MODES = ("inline", "queue")
 DEFAULT_EXECUTION_MODE: ExecutionMode = "inline"
-DEFAULT_MAX_GLOBAL_JOBS = 10
+DEFAULT_MAX_GLOBAL_JOBS = 50
 DEFAULT_WORKER_REPLICAS = 1
 DEFAULT_LONG_RUNNING_JOB_MIN = 180
+DEFAULT_WORKER_THREADS = 3
 MIN_MAX_GLOBAL_JOBS = 1
 MAX_MAX_GLOBAL_JOBS = 50
 MIN_WORKER_REPLICAS = 0
+MIN_WORKER_THREADS = 1
+MAX_WORKER_THREADS = 16
 
 
 class JobExecutionConfigService:
@@ -33,6 +36,7 @@ class JobExecutionConfigService:
             "execution-mode": ("JOB_EXECUTION_MODE", DEFAULT_EXECUTION_MODE),
             "max-global-jobs": ("MAX_GLOBAL_JOBS", str(DEFAULT_MAX_GLOBAL_JOBS)),
             "worker-replicas": ("JOB_WORKER_REPLICAS", str(DEFAULT_WORKER_REPLICAS)),
+            "worker-threads": ("JOB_WORKER_THREADS", str(DEFAULT_WORKER_THREADS)),
             "long-running-job-min": ("STALE_JOB_LONG_RUNNING_MIN", str(DEFAULT_LONG_RUNNING_JOB_MIN)),
         }
         env_var, fallback = env_map[name]
@@ -69,6 +73,14 @@ class JobExecutionConfigService:
             value = DEFAULT_WORKER_REPLICAS
         return max(MIN_WORKER_REPLICAS, min(self._max_worker_replicas, value))
 
+    def get_worker_threads(self) -> int:
+        raw, _ = self._read_env("worker-threads", str(DEFAULT_WORKER_THREADS))
+        try:
+            value = int(raw or DEFAULT_WORKER_THREADS)
+        except (TypeError, ValueError):
+            value = DEFAULT_WORKER_THREADS
+        return max(MIN_WORKER_THREADS, min(MAX_WORKER_THREADS, value))
+
     def get_long_running_job_min(self) -> int:
         raw, _ = self._read_env("long-running-job-min", str(DEFAULT_LONG_RUNNING_JOB_MIN))
         try:
@@ -79,6 +91,24 @@ class JobExecutionConfigService:
 
     def is_queue_mode(self) -> bool:
         return self.get_execution_mode() == "queue"
+
+    def apply_overrides(
+        self,
+        *,
+        worker_threads: Optional[int] = None,
+        max_global_jobs: Optional[int] = None,
+    ) -> dict:
+        """Update process env so subsequent reads pick up new values."""
+        applied: dict = {}
+        if worker_threads is not None:
+            value = max(MIN_WORKER_THREADS, min(MAX_WORKER_THREADS, int(worker_threads)))
+            os.environ["JOB_WORKER_THREADS"] = str(value)
+            applied["worker_threads"] = value
+        if max_global_jobs is not None:
+            value = max(MIN_MAX_GLOBAL_JOBS, min(MAX_MAX_GLOBAL_JOBS, int(max_global_jobs)))
+            os.environ["MAX_GLOBAL_JOBS"] = str(value)
+            applied["max_global_jobs"] = value
+        return applied
 
 
 _service: Optional[JobExecutionConfigService] = None

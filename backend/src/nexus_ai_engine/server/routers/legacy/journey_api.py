@@ -154,6 +154,11 @@ class BatchDeleteJobsRequest(BaseModel):
     job_ids: List[str] = Field(..., min_length=1, description="Job IDs to delete")
 
 
+class BulkRunJourneysRequest(BaseModel):
+    journey_ids: List[str] = Field(..., min_length=1, max_length=100)
+    triggered_by: str = Field("ui")
+
+
 # ==========================================
 # Journey CRUD Operations (Direct)
 # ==========================================
@@ -203,6 +208,30 @@ async def create_journey(request: JourneyCreateRequest) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error creating journey: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/archived-jobs")
+async def search_archived_jobs(
+    query: Optional[str] = Query(None, description="Job number or job ID to search"),
+    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    limit: int = Query(50, ge=1, le=500),
+) -> Dict[str, Any]:
+    from ....services.archived_jobs_service import ArchivedJobsService
+
+    return ArchivedJobsService().search(
+        query=query,
+        date_from=date_from,
+        date_to=date_to,
+        limit=limit,
+    )
+
+
+@router.get("/archived-jobs/{job_id}/logs")
+async def get_archived_job_logs(job_id: str) -> Dict[str, Any]:
+    from ....services.archived_jobs_service import ArchivedJobsService
+
+    return ArchivedJobsService().get_logs(job_id)
 
 
 @router.get("/{journey_id}")
@@ -419,6 +448,27 @@ async def delete_journey(journey_id: str, force: bool = Query(True)) -> Dict[str
 # ==========================================
 # Batch Operations
 # ==========================================
+
+@router.post("/bulk-run")
+async def bulk_run_journeys(request: BulkRunJourneysRequest) -> Dict[str, Any]:
+    """Create all journey jobs, then enqueue them in one Redis burst."""
+    if not journey_service:
+        raise HTTPException(status_code=503, detail="Journey service unavailable")
+    result = await journey_service.run_jobs_bulk(
+        request.journey_ids,
+        triggered_by=request.triggered_by or "ui",
+    )
+    if result.status == "error":
+        raise HTTPException(status_code=400, detail=result.message)
+    payload = result.data if isinstance(result.data, dict) else {}
+    return {
+        "success": True,
+        "message": result.message,
+        "queued": payload.get("queued", 0),
+        "failed": payload.get("failed", 0),
+        "jobs": payload.get("jobs") or [],
+    }
+
 
 @router.post("/batch", response_model=Dict[str, Any])
 async def batch_operation(

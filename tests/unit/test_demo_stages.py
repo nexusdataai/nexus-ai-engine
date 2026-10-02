@@ -33,16 +33,17 @@ from nexus_ai_engine.stages.registry import (
 
 
 def test_demo_journeys_count_and_names() -> None:
-    """Five journeys in a stable order — the seed script and UI tests
-    rely on this set."""
+    """Core journeys stay first; the supply-chain load set brings the catalog to 50+."""
     names = [j["name"] for j in DEMO_JOURNEYS]
-    assert names == [
+    assert names[:5] == [
         "Order-to-Cash Monitor",
         "Call Processing Pipeline",
         "Demand Forecasting Engine",
         "Inventory Optimization",
         "Supply Chain Risk",
     ]
+    assert len(names) >= 50
+    assert len(names) == len(set(names))
 
 
 def test_every_journey_has_required_fields() -> None:
@@ -51,6 +52,7 @@ def test_every_journey_has_required_fields() -> None:
         "billing-management", "payment-management", "inventory-management",
         "party-management", "resource-management", "service-management",
         "data-pipeline",
+        "risk-management",
     }
     for j in DEMO_JOURNEYS:
         assert {"name", "description", "odaComponentType", "stages"} <= set(j)

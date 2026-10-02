@@ -128,7 +128,7 @@ def _build_engine_config_from_ssm(prefix: str):
             if str(_ssm_or_env("job_execution_mode") or "inline").lower() == "queue"
             else "inline"
         ),
-        max_global_jobs=int(_ssm_or_env("max_global_jobs") or _ssm_or_env("max_concurrent_jobs") or "10"),
+        max_global_jobs=int(_ssm_or_env("max_global_jobs") or _ssm_or_env("max_concurrent_jobs") or "50"),
         sse_redis_enabled=str(_ssm_or_env("sse_redis_enabled") or "true").lower()
         not in ("0", "false", "no"),
         capability_name=_ssm_or_env("capability_name") or "ai-engine",
@@ -179,6 +179,14 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             logging.getLogger(__name__).exception(
                 "Demo stage registration failed: %s", exc
             )
+
+    try:
+        from ..stages import register_job_archival_stage
+
+        register_job_archival_stage()
+        logging.getLogger(__name__).info("Registered job_archival stage")
+    except Exception as exc:
+        logging.getLogger(__name__).exception("job_archival registration failed: %s", exc)
 
     app = create_app(engine=engine, cors_origins=args.cors_origin or None)
     uvicorn.run(

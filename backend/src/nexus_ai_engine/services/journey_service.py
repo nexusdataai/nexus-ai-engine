@@ -186,7 +186,11 @@ class JourneyService:
     @classmethod
     def cancel_running_job(cls, job_id: str) -> bool:
         from ..execution.transformation_job_executor import TransformationJobExecutor
+        from .job_queue_service import drop_queue_job, is_queue_mode
+
         TransformationJobExecutor.cancel_job_execution(job_id)
+        if is_queue_mode():
+            drop_queue_job(job_id)
         task = cls._job_tasks.get(job_id)
         if task and not task.done():
             task.cancel()
@@ -1436,9 +1440,6 @@ class JourneyService:
 
             from .job_queue_service import (
                 enqueue_job,
-                get_active_job_count,
-                get_max_global_jobs,
-                get_pending_count,
                 is_queue_mode,
                 redis_available,
             )
@@ -1452,21 +1453,7 @@ class JourneyService:
                         journey_id=journey_id,
                         error_code="REDIS_UNAVAILABLE",
                     )
-                active = get_active_job_count()
-                pending = get_pending_count()
-                max_global = get_max_global_jobs()
-                if active + pending >= max_global:
-                    return JourneyResponse(
-                        status="error",
-                        message=(
-                            f"Maximum global jobs ({max_global}) reached. "
-                            f"Active: {active}, pending: {pending}."
-                        ),
-                        operation="run_job",
-                        journey_id=journey_id,
-                        error_code="CAPACITY_EXCEEDED",
-                        metadata=self.get_job_stats(),
-                    )
+                # Overflow waits in Redis. Workers enforce MAX_GLOBAL_JOBS via ActiveJobGuard.
             else:
                 running_count = self.get_running_job_count()
                 if running_count >= MAX_CONCURRENT_JOBS:
@@ -1634,4 +1621,102 @@ class JourneyService:
                 error_code=error_code,
                 error=error_msg
             )
+
+    async def run_jobs_bulk(
+        self,
+        journey_ids: List[str],
+        triggered_by: str = "ui",
+    ) -> JourneyResponse:
+        """Slim-create every job, persist in one Dynamo batch, then enqueue.
+
+        Stage metadata is read from class attrs (no AWS client per stage).
+        Workers claim immediately on XADD, so persist finishes before the
+        Redis burst (14 queued → 3 running + 11 waiting).
+        """
+        from .job_queue_service import enqueue_jobs, is_queue_mode, redis_available
+        from ..execution.transformation_job_executor import TransformationJobExecutor
+
+        ids = [jid for jid in journey_ids if jid]
+        if not ids:
+            return JourneyResponse(
+                status="error",
+                message="No journey IDs provided",
+                operation="run_jobs_bulk",
+                error_code="VALIDATION_ERROR",
+            )
+        if not is_queue_mode():
+            return JourneyResponse(
+                status="error",
+                message="bulk-run requires JOB_EXECUTION_MODE=queue so all jobs enter the wait stream together",
+                operation="run_jobs_bulk",
+                error_code="QUEUE_REQUIRED",
+            )
+        if not redis_available():
+            return JourneyResponse(
+                status="error",
+                message="JOB_EXECUTION_MODE=queue requires REDIS_URL but Redis is unavailable",
+                operation="run_jobs_bulk",
+                error_code="REDIS_UNAVAILABLE",
+            )
+
+        loop = asyncio.get_event_loop()
+        executor = TransformationJobExecutor()
+        reason = "Bulk journey pipeline"
+
+        async def _prepare(journey_id: str) -> Dict[str, Any]:
+            try:
+                job_id, item = await loop.run_in_executor(
+                    None,
+                    executor.prepare_journey_job_execution,
+                    journey_id,
+                    None,
+                    triggered_by,
+                    reason,
+                )
+                data = item.get("Data") or {}
+                return {
+                    "ok": True,
+                    "job_id": job_id,
+                    "journey_id": journey_id,
+                    "job_kind": "transformation",
+                    "stage_id": "",
+                    "stage_ids": data.get("stageIds") or [],
+                    "triggered_by": triggered_by,
+                    "reason": reason,
+                    "job_config": {},
+                    "_item": item,
+                }
+            except Exception as exc:
+                return {"journey_id": journey_id, "ok": False, "error": str(exc)}
+
+        created = await asyncio.gather(*[_prepare(jid) for jid in ids])
+        ready = [row for row in created if row.get("ok")]
+        failed = [row for row in created if not row.get("ok")]
+        items = [row.pop("_item") for row in ready]
+        if items:
+            await loop.run_in_executor(None, executor.persist_job_items, items)
+            enqueue_jobs(ready)
+
+        return JourneyResponse(
+            status="success" if ready else "error",
+            message=(
+                f"Queued {len(ready)} job(s)"
+                + (f", {len(failed)} failed" if failed else "")
+            ),
+            operation="run_jobs_bulk",
+            data={
+                "queued": len(ready),
+                "failed": len(failed),
+                "jobs": [
+                    {
+                        "journey_id": row["journey_id"],
+                        "job_id": row.get("job_id"),
+                        "ok": bool(row.get("ok")),
+                        "error": row.get("error"),
+                    }
+                    for row in created
+                ],
+            },
+            metadata=self.get_job_stats(),
+        )
 

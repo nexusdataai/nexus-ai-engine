@@ -9,10 +9,22 @@ const STATUS_STYLES: Record<string, string> = {
   FAILED: "bg-red-500/15 text-red-300 border-red-500/30",
   pending: "bg-muted text-muted-foreground border-border",
   PENDING: "bg-muted text-muted-foreground border-border",
+  queued: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  QUEUED: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  queuing: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  QUEUING: "bg-amber-500/15 text-amber-300 border-amber-500/30",
   cancelled: "bg-orange-500/15 text-orange-300 border-orange-500/30",
   CANCELLED: "bg-orange-500/15 text-orange-300 border-orange-500/30",
   paused: "bg-amber-500/15 text-amber-300 border-amber-500/30",
   PAUSED: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  idle: "bg-muted text-muted-foreground border-border",
+  IDLE: "bg-muted text-muted-foreground border-border",
+  healthy: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  HEALTHY: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
+  stale: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  STALE: "bg-amber-500/15 text-amber-300 border-amber-500/30",
+  offline: "bg-red-500/15 text-red-300 border-red-500/30",
+  OFFLINE: "bg-red-500/15 text-red-300 border-red-500/30",
 };
 
 export function StatusBadge({ status, className }: { status: string; className?: string }) {

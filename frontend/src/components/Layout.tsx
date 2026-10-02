@@ -9,7 +9,7 @@ import { InactivityGuard } from "@/components/InactivityGuard";
 import { ThemeToggle, UserMenu } from "@/components/UserMenu";
 import { Button } from "@/components/ui/button";
 import { useTheme } from "@/hooks/useTheme";
-import { fetchVersion } from "@/services/api";
+import { api } from "@/services/api";
 
 const TITLES: Record<string, string> = {
   "/": "Dashboard",
@@ -18,7 +18,9 @@ const TITLES: Record<string, string> = {
   "/queue": "Queue",
   "/workers": "Workers",
   "/schedules": "Schedules",
+  "/settings": "Settings",
   "/tools": "Tools Catalog",
+  "/operations": "Operations",
 };
 
 function resolveTitle(pathname: string): string {
@@ -33,7 +35,7 @@ function LayoutInner({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const { theme, toggleTheme } = useTheme();
   const { setMobileOpen, mini, setMini } = useSidebarChrome();
-  const { data } = useQuery({ queryKey: ["version"], queryFn: fetchVersion });
+  const { data } = useQuery({ queryKey: ["settings"], queryFn: () => api.getSettings() });
   const title = resolveTitle(loc.pathname);
 
   return (
@@ -70,7 +72,7 @@ function LayoutInner({ children }: { children: ReactNode }) {
           <div className="flex items-center gap-1 shrink-0">
             <ThemeToggle theme={theme} toggle={toggleTheme} />
             <UserMenu />
-            <span className="hidden sm:inline text-xs text-muted-foreground pl-1">v{data?.version ?? "…"}</span>
+            <span className="hidden sm:inline text-xs text-muted-foreground pl-1">v{data?.version?.version ?? "…"}</span>
           </div>
         </header>
         <main id="main-content" className="flex-1 overflow-auto relative p-4" tabIndex={-1}>

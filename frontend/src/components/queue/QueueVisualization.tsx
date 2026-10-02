@@ -96,7 +96,13 @@ export function QueueVisualization({ jobs, maxGlobal }: Props) {
         <p className="text-xs font-medium text-muted-foreground mb-2">
           Active slots ({running.length} running / {maxGlobal} max)
         </p>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5" data-testid="queue-active-slots">
+        <div
+          className={cn(
+            "grid gap-2",
+            maxGlobal > 10 ? "sm:grid-cols-5 lg:grid-cols-10" : "sm:grid-cols-2 lg:grid-cols-5",
+          )}
+          data-testid="queue-active-slots"
+        >
           {slots.map((job, idx) => (
             <div
               key={job?.stream_id ?? `empty-${idx}`}

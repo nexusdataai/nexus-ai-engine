@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import asyncio
+import json
+from typing import Any, AsyncIterator, Literal
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from ...services.job_queue_service import (
     get_queue_snapshot,
@@ -55,3 +58,40 @@ async def queue_timeline(
     _require_queue_mode()
     events = get_queue_timeline(limit=limit)
     return {"events": events, "count": len(events)}
+
+
+@router.get("/stream")
+async def queue_stream() -> StreamingResponse:
+    """SSE snapshot of waiting/claimed/running jobs. Emits on change (~500ms)."""
+    _require_queue_mode()
+
+    async def _events() -> AsyncIterator[str]:
+        last = ""
+        idle_ticks = 0
+        while True:
+            snap = get_queue_snapshot()
+            jobs = list_queue_jobs(state="all", limit=200)
+            payload = json.dumps(
+                {"summary": snap, "jobs": jobs, "count": len(jobs), "state": "all"},
+                default=str,
+            )
+            if payload != last:
+                last = payload
+                idle_ticks = 0
+                yield f"event: queue\ndata: {payload}\n\n"
+            else:
+                idle_ticks += 1
+                if idle_ticks >= 20:
+                    idle_ticks = 0
+                    yield ": keepalive\n\n"
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        _events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

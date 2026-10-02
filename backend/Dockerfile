@@ -50,6 +50,9 @@ RUN pip install --upgrade pip setuptools wheel && \
 
 FROM python:3.12-slim AS production
 
+ARG VERSION=0.0.0
+ARG BUILD_SHA=unknown
+
 RUN apt-get update \
  && apt-get upgrade -y \
  && apt-get install -y --no-install-recommends curl make \
@@ -62,8 +65,11 @@ RUN apt-get update \
 
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chown=aiengine:aiengine /build /app
+COPY backend/VERSION /VERSION
 
 ENV PATH="/opt/venv/bin:$PATH" \
+    APP_VERSION=${VERSION} \
+    GIT_SHA=${BUILD_SHA} \
     API_HOST=0.0.0.0 \
     API_PORT=8000 \
     LOG_LEVEL=INFO \

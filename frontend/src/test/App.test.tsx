@@ -11,6 +11,17 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo) => {
       const url = String(input);
+      if (url.includes("/api/v1/settings")) {
+        return new Response(
+          JSON.stringify({
+            workers: {},
+            queue: {},
+            scheduler: {},
+            version: { name: "nexus-ai-engine", version: "0.3.0" },
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
       if (url.includes("/version")) {
         return new Response(JSON.stringify({ version: "0.3.0" }), {
           status: 200,

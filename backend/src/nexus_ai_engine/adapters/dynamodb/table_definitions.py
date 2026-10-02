@@ -15,6 +15,7 @@ def table_names(env: str) -> dict[str, str]:
         "journeys": f"ai-engine-journeys-{env}",
         "executions": f"ai-engine-executions-{env}",
         "prompts": f"ai-engine-prompts-{env}",
+        "dlq": f"ai-engine-dlq-{env}",
     }
 
 
@@ -26,6 +27,7 @@ def table_names_for(capability: str, environment: str) -> dict[str, str]:
         "journeys": f"{cap}-{env}-journeys",
         "executions": f"{cap}-{env}-executions",
         "prompts": f"{cap}-{env}-prompts",
+        "dlq": f"{cap}-{env}-dlq",
     }
 
 
@@ -129,6 +131,21 @@ def prompts_table_definition(table_name: str) -> dict[str, Any]:
     }
 
 
+def dlq_table_definition(table_name: str) -> dict[str, Any]:
+    return {
+        "TableName": table_name,
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [
+            {"AttributeName": "PK", "AttributeType": "S"},
+            {"AttributeName": "SK", "AttributeType": "S"},
+        ],
+        "KeySchema": [
+            {"AttributeName": "PK", "KeyType": "HASH"},
+            {"AttributeName": "SK", "KeyType": "RANGE"},
+        ],
+    }
+
+
 def create_all_tables(client: Any, env: str) -> dict[str, str]:
     """Create journeys, executions, and prompts tables. Returns table name map."""
     names = table_names(env)
@@ -136,6 +153,7 @@ def create_all_tables(client: Any, env: str) -> dict[str, str]:
         ("journeys", journeys_table_definition),
         ("executions", executions_table_definition),
         ("prompts", prompts_table_definition),
+        ("dlq", dlq_table_definition),
     ):
         table_name = names[key]
         try:

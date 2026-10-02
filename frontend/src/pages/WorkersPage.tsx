@@ -53,7 +53,6 @@ export function WorkersPage() {
   const [autoEnabled, setAutoEnabled] = useState<boolean | null>(null);
   const [minReplicas, setMinReplicas] = useState<number | null>(null);
   const [maxReplicas, setMaxReplicas] = useState<number | null>(null);
-  const [lagThreshold, setLagThreshold] = useState<number | null>(null);
   const [scaleFeedback, setScaleFeedback] = useState<ActionFeedback | null>(null);
   const [autoscaleFeedback, setAutoscaleFeedback] = useState<ActionFeedback | null>(null);
 
@@ -62,7 +61,8 @@ export function WorkersPage() {
   const autoOn = autoEnabled ?? autoscaling?.enabled ?? false;
   const autoMin = minReplicas ?? autoscaling?.min_replicas ?? 1;
   const autoMax = maxReplicas ?? autoscaling?.max_replicas ?? 10;
-  const autoLag = lagThreshold ?? autoscaling?.lag_threshold ?? 5;
+  const autoThreads = autoscaling?.threads ?? 3;
+  const autoLag = autoscaling?.lag_threshold ?? 2 * autoThreads;
 
   const refreshWorkers = async () => {
     await Promise.all([
@@ -82,12 +82,16 @@ export function WorkersPage() {
     onSuccess: async (data, requestedReplicas) => {
       setReplicas(null);
       await refreshWorkers();
-      const dep = data.deployment;
+      const dep = data.deployment as { desired?: number; ready?: number } | undefined;
+      const kedaSynced = Boolean(data.keda_synced);
+      const base = dep
+        ? `Scaled to ${dep.desired} desired / ${dep.ready} ready.`
+        : `Scale request accepted: ${data.replicas ?? requestedReplicas} replica(s).`;
       setScaleFeedback({
         type: "success",
-        message: dep
-          ? `Scaled to ${dep.desired} desired / ${dep.ready} ready (was ${requestedReplicas} requested).`
-          : `Scale request accepted: ${data.replicas ?? requestedReplicas} replica(s).`,
+        message: kedaSynced
+          ? `${base} KEDA min replicas updated to match (autoscaling still active).`
+          : base,
       });
     },
     onError: (error) => {
@@ -111,13 +115,12 @@ export function WorkersPage() {
       setAutoEnabled(null);
       setMinReplicas(null);
       setMaxReplicas(null);
-      setLagThreshold(null);
       await refreshWorkers();
       const enabled = Boolean(data.enabled ?? autoOn);
       setAutoscaleFeedback({
         type: "success",
         message: enabled
-          ? `Autoscaling enabled (min ${data.min_replicas ?? autoMin}, max ${data.max_replicas ?? autoMax}, lag ${data.lag_threshold ?? autoLag}).`
+          ? `Two-wave autoscaling enabled (min ${data.min_replicas ?? autoMin}, max ${data.max_replicas ?? autoMax}, ${data.lag_threshold ?? autoLag} pending/worker).`
           : "Autoscaling disabled — manual replica count applies. Check the box above to enable KEDA scaling.",
       });
     },
@@ -254,9 +257,9 @@ export function WorkersPage() {
                 onChange={(e) => setAutoEnabled(e.target.checked)}
                 disabled={!k8sAvailable}
               />
-              Enable autoscaling on queue lag
+              Enable two-wave queue autoscaling
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               <label className="text-xs text-muted-foreground">
                 Min
                 <input
@@ -279,18 +282,12 @@ export function WorkersPage() {
                   disabled={!k8sAvailable}
                 />
               </label>
-              <label className="text-xs text-muted-foreground">
-                Lag threshold
-                <input
-                  type="number"
-                  min={1}
-                  value={autoLag}
-                  onChange={(e) => setLagThreshold(Number(e.target.value))}
-                  className="mt-1 w-full rounded border border-border bg-background px-2 py-1"
-                  disabled={!k8sAvailable}
-                />
-              </label>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Scale up only when waiting jobs exceed 2 waves of current workers
+              (1 wave = replicas × {autoThreads} threads). Target {autoLag} pending jobs
+              per worker. At most +2 pods / 30s, −1 pod / 60s.
+            </p>
             <Button
               variant="outline"
               disabled={!k8sAvailable || autoscaleMutation.isPending}
@@ -343,8 +340,10 @@ export function WorkersPage() {
                       <td className="py-2 pr-4">
                         <StatusBadge
                           status={
-                            w.status === "healthy" || w.status === "idle"
-                              ? "SUCCEEDED"
+                            w.status === "healthy"
+                              ? "RUNNING"
+                              : w.status === "idle"
+                                ? "IDLE"
                               : w.status === "stale"
                                 ? "PAUSED"
                                 : w.status === "offline"

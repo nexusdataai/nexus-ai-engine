@@ -10,8 +10,9 @@ import signal
 import sys
 import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Optional
+from typing import Optional, Set
 from uuid import UUID
 
 from loguru import logger
@@ -28,29 +29,58 @@ from nexus_ai_engine.services.job_queue_service import (
     get_active_job_count,
     get_pending_count,
     get_queue_depth,
+    get_worker_threads,
     make_consumer_name,
     reclaim_stale_jobs,
 )
 
 WORKER_HEALTH_PORT = int(os.getenv("JOB_WORKER_HEALTH_PORT", "8081"))
+SHUTDOWN_JOIN_SECONDS = 30
 _shutdown = threading.Event()
 _consumer_name: Optional[str] = None
-_runtime_service = None
+_pool_threads = 3
+_pool_in_flight = 0
 
 
-def _get_runtime_service():
-    global _runtime_service
-    if _runtime_service is None:
-        from nexus_ai_engine.adapters.dynamodb.execution_repo import DynamoDBExecutionRepository
-        from nexus_ai_engine.execution.runtime_service import ExecutionRuntimeService
-        from nexus_ai_engine.executor.admission import AdmissionController
+def _set_pool_metrics(threads: int, in_flight: int) -> None:
+    global _pool_threads, _pool_in_flight
+    _pool_threads = threads
+    _pool_in_flight = in_flight
 
-        repo = DynamoDBExecutionRepository()
-        _runtime_service = ExecutionRuntimeService(
-            repository=repo,
-            admission=AdmissionController(repository=repo),
-        )
-    return _runtime_service
+
+def prune_finished(in_flight: Set[Future]) -> None:
+    """Drop completed futures on the main thread. Returns remaining set in place."""
+    for fut in [item for item in in_flight if item.done()]:
+        in_flight.discard(fut)
+        try:
+            exc = fut.exception()
+            if exc is not None:
+                logger.exception("Job thread failed: {}", exc)
+        except Exception:
+            logger.exception("Failed reading job thread result")
+
+
+def slots_free(in_flight: Set[Future], threads: int) -> int:
+    prune_finished(in_flight)
+    return max(0, threads - len(in_flight))
+
+
+def reclaim_for_slots(consumer_name: str, slots: int) -> list:
+    if slots <= 0:
+        return []
+    return reclaim_stale_jobs(consumer_name, limit=slots)
+
+
+def _new_runtime_service():
+    from nexus_ai_engine.adapters.dynamodb.execution_repo import DynamoDBExecutionRepository
+    from nexus_ai_engine.execution.runtime_service import ExecutionRuntimeService
+    from nexus_ai_engine.executor.admission import AdmissionController
+
+    repo = DynamoDBExecutionRepository()
+    return ExecutionRuntimeService(
+        repository=repo,
+        admission=AdmissionController(repository=repo),
+    )
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -73,6 +103,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
                         "queue_depth": get_queue_depth(),
                         "pending": get_pending_count(),
                         "active_jobs": get_active_job_count(),
+                        "worker_threads": _pool_threads,
+                        "in_flight": _pool_in_flight,
                     }
                 ).encode()
                 self.send_response(200)
@@ -85,6 +117,8 @@ class _HealthHandler(BaseHTTPRequestHandler):
                     "job_queue_depth": get_queue_depth(),
                     "job_queue_pending": get_pending_count(),
                     "job_worker_active": get_active_job_count(),
+                    "worker_threads": _pool_threads,
+                    "in_flight": _pool_in_flight,
                 }
             ).encode()
             self.send_response(200)
@@ -106,7 +140,7 @@ def _start_health_server() -> ThreadingHTTPServer:
 
 
 def _run_dsl_job(job: QueuedJob) -> None:
-    runtime = _get_runtime_service()
+    runtime = _new_runtime_service()
     asyncio.run(runtime.run_to_completion(UUID(job.job_id)))
 
 
@@ -120,6 +154,11 @@ def _process_job(job: QueuedJob, executor: TransformationJobExecutor) -> None:
     )
     should_ack = True
     try:
+        from nexus_ai_engine.services.job_queue_service import is_cancel_requested
+
+        if is_cancel_requested(job.job_id):
+            logger.info("Skipping cancelled job {}", job.job_id)
+            return
         with ActiveJobGuard():
             if job.job_kind == "dsl_execution":
                 _run_dsl_job(job)
@@ -153,22 +192,45 @@ def worker_loop() -> None:
     ensure_consumer_group()
     sse_manager.enable_redis_bridge(publish_only=True)
     executor = TransformationJobExecutor()
-    logger.info("Job worker started as {}", _consumer_name)
+    threads = get_worker_threads()
+    in_flight: Set[Future] = set()
+    _set_pool_metrics(threads, 0)
+    logger.info("Job worker started as {} with {} threads", _consumer_name, threads)
 
-    while not _shutdown.is_set():
-        try:
-            for reclaimed in reclaim_stale_jobs(_consumer_name):
-                if _shutdown.is_set():
-                    break
-                _process_job(reclaimed, executor)
+    with ThreadPoolExecutor(max_workers=threads, thread_name_prefix="job-exec") as pool:
+        while not _shutdown.is_set():
+            try:
+                free = slots_free(in_flight, threads)
+                _set_pool_metrics(threads, len(in_flight))
+                if free <= 0:
+                    wait(in_flight, timeout=1.0, return_when=FIRST_COMPLETED)
+                    continue
 
-            job = claim_job(_consumer_name, block_ms=2000)
-            if job is None:
-                continue
-            _process_job(job, executor)
-        except Exception as exc:
-            logger.exception("Job worker loop error: {}", exc)
-            time.sleep(1)
+                for job in reclaim_for_slots(_consumer_name, free):
+                    if _shutdown.is_set():
+                        break
+                    in_flight.add(pool.submit(_process_job, job, executor))
+                    free = slots_free(in_flight, threads)
+                    _set_pool_metrics(threads, len(in_flight))
+                    if free <= 0:
+                        break
+                if free <= 0 or _shutdown.is_set():
+                    continue
+
+                job = claim_job(_consumer_name, block_ms=2000)
+                if job is None:
+                    continue
+                in_flight.add(pool.submit(_process_job, job, executor))
+                _set_pool_metrics(threads, len(in_flight))
+            except Exception as exc:
+                logger.exception("Job worker loop error: {}", exc)
+                time.sleep(1)
+
+        if in_flight:
+            logger.info("Waiting for {} in-flight job(s) to finish", len(in_flight))
+            wait(in_flight, timeout=SHUTDOWN_JOIN_SECONDS)
+            prune_finished(in_flight)
+            _set_pool_metrics(threads, len(in_flight))
 
 
 def _handle_signal(signum, frame):  # noqa: ARG001
@@ -193,6 +255,14 @@ def main() -> None:
             logger.info("Registered {} demo stages in worker: {}", len(registered), ", ".join(registered))
         except Exception as exc:
             logger.exception("Demo stage registration failed: {}", exc)
+
+    try:
+        from nexus_ai_engine.stages import register_job_archival_stage
+
+        register_job_archival_stage()
+        logger.info("Registered job_archival stage in worker")
+    except Exception as exc:
+        logger.exception("job_archival registration failed: {}", exc)
 
     health_server = _start_health_server()
     try:

@@ -46,6 +46,16 @@ def glue_database_name(*, capability: str | None = None, environment: str | None
     return f"{cap.replace('-', '_')}_{env.replace('-', '_')}_db"
 
 
+def resolved_glue_database() -> str:
+    """Env override, else {capability}_{env}_db. Never silently use Glue 'default'."""
+    return (os.getenv("GLUE_DATABASE_NAME") or os.getenv("GLUE_DATABASE") or glue_database_name()).strip()
+
+
+def resolved_dlq_table() -> str:
+    """Env override, else {capability}-{environment}-dlq."""
+    return (os.getenv("DYNAMODB_DLQ_TABLE") or dynamodb_table_name("dlq")).strip()
+
+
 def s3_bucket_name(
     purpose: str,
     *,

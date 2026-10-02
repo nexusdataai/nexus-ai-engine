@@ -310,7 +310,7 @@ class StaleJobManager:
     def _scan_blocked_schedules(self) -> List[BlockedScheduleRecord]:
         fe = "#et = :et AND #d.#l = :inp"
         ean = {"#et": "EntityType", "#d": "Data", "#l": "lastJobStatus"}
-        eav: Dict[str, Any] = {":et": "Schedule", ":inp": "in_progress"}
+        eav: Dict[str, Any] = {":et": "BatchSchedule", ":inp": "in_progress"}
         if self.journey_id_filter:
             fe += " AND #d.journeyId = :jid"
             eav[":jid"] = self.journey_id_filter

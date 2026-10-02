@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 from nexus_ai_engine.contracts.execution_state import ExecutionState, ExecutionStatus
 from nexus_ai_engine.contracts.journey_dsl import JourneyDefinition
 from nexus_ai_engine.events.sse import SSEManager, emit
-from nexus_ai_engine.executor.admission import AdmissionController, AdmissionRejectedError
+from nexus_ai_engine.executor.admission import AdmissionController
 from nexus_ai_engine.executor.manager import ExecutionManager, SubmitExecutionRequest, TickOutcome
 
 logger = logging.getLogger(__name__)
@@ -59,9 +59,6 @@ class ExecutionRuntimeService:
 
         from ..services.job_queue_service import (
             enqueue_job,
-            get_active_job_count,
-            get_max_global_jobs,
-            get_pending_count,
             is_queue_mode,
             redis_available,
         )
@@ -69,13 +66,6 @@ class ExecutionRuntimeService:
         if is_queue_mode():
             if not redis_available():
                 raise RuntimeError("JOB_EXECUTION_MODE=queue requires REDIS_URL but Redis is unavailable")
-            active = get_active_job_count()
-            pending = get_pending_count()
-            max_global = get_max_global_jobs()
-            if active + pending >= max_global:
-                raise AdmissionRejectedError(
-                    f"Maximum global jobs ({max_global}) reached (active={active}, pending={pending})"
-                )
             enqueue_job(
                 job_id=str(state.execution_id),
                 journey_id=state.journey_id,

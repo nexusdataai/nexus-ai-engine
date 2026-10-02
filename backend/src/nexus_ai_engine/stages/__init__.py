@@ -19,6 +19,7 @@ from .demo import (
     list_demo_stage_ids,
     register_demo_stages,
 )
+from .job_archival import JobArchivalStage, register_job_archival_stage
 from .plugin_journey_stage import PluginJourneyStage
 from .registry import (
     STAGE_REGISTRY,
@@ -32,6 +33,7 @@ __all__ = [
     "BaseStage",
     "DEMO_JOURNEYS",
     "DemoStage",
+    "JobArchivalStage",
     "PluginJourneyStage",
     "STAGE_REGISTRY",
     "clear_registry",
@@ -39,5 +41,6 @@ __all__ = [
     "list_available_stages",
     "list_demo_stage_ids",
     "register_demo_stages",
+    "register_job_archival_stage",
     "register_stage",
 ]

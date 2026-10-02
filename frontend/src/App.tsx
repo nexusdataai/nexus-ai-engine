@@ -10,6 +10,8 @@ import { JourneyStudioPage } from "@/pages/JourneyStudioPage";
 import { JourneysListPage } from "@/pages/JourneysListPage";
 import { QueuePage } from "@/pages/QueuePage";
 import { SchedulesPage } from "@/pages/SchedulesPage";
+import { OperationsPage } from "@/pages/OperationsPage";
+import { SettingsPage } from "@/pages/SettingsPage";
 import { StageJobDetailPage } from "@/pages/StageJobDetailPage";
 import { ToolsCatalogPage } from "@/pages/ToolsCatalogPage";
 import { WorkersPage } from "@/pages/WorkersPage";
@@ -28,7 +30,9 @@ export default function App() {
         <Route path="queue" element={<QueuePage />} />
         <Route path="workers" element={<WorkersPage />} />
         <Route path="schedules" element={<SchedulesPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="tools" element={<ToolsCatalogPage />} />
+        <Route path="operations" element={<OperationsPage />} />
         <Route path="auth/callback" element={<AuthCallbackPage />} />
       </Routes>
     </Layout>

@@ -38,6 +38,74 @@ KEDA_GROUP = "keda.sh"
 KEDA_VERSION = "v1alpha1"
 KEDA_PLURAL = "scaledobjects"
 
+# Two-wave drain: one wave = replicas × threads. Scale up only when waiting
+# jobs exceed two waves of current capacity. KEDA lagCount = 2 × threads.
+SCALE_HORIZON_WAVES = 2
+SCALE_UP_PODS = 2
+SCALE_UP_PERIOD_SEC = 30
+SCALE_UP_STABILIZATION_SEC = 30
+SCALE_DOWN_PODS = 1
+SCALE_DOWN_PERIOD_SEC = 60
+SCALE_DOWN_STABILIZATION_SEC = 180
+
+
+def two_wave_lag_count(threads: int) -> int:
+    return max(1, SCALE_HORIZON_WAVES * max(1, int(threads)))
+
+
+def useful_max_replicas(max_replicas: int, min_replicas: int, max_global_jobs: int, threads: int) -> int:
+    useful = max(1, int(max_global_jobs) // max(1, int(threads)))
+    return max(int(min_replicas), min(int(max_replicas), useful))
+
+
+def keda_hpa_behavior() -> Dict[str, Any]:
+    return {
+        "scaleUp": {
+            "stabilizationWindowSeconds": SCALE_UP_STABILIZATION_SEC,
+            "selectPolicy": "Max",
+            "policies": [{"type": "Pods", "value": SCALE_UP_PODS, "periodSeconds": SCALE_UP_PERIOD_SEC}],
+        },
+        "scaleDown": {
+            "stabilizationWindowSeconds": SCALE_DOWN_STABILIZATION_SEC,
+            "selectPolicy": "Min",
+            "policies": [{"type": "Pods", "value": SCALE_DOWN_PODS, "periodSeconds": SCALE_DOWN_PERIOD_SEC}],
+        },
+    }
+
+
+def build_scaled_object_spec(
+    *,
+    deployment_name: str,
+    min_replicas: int,
+    max_replicas: int,
+    redis_address: str,
+    threads: int,
+    max_global_jobs: int,
+    stream: str = JOB_STREAM_KEY,
+    consumer_group: str = JOB_CONSUMER_GROUP,
+) -> Dict[str, Any]:
+    lag_count = two_wave_lag_count(threads)
+    max_replicas = useful_max_replicas(max_replicas, min_replicas, max_global_jobs, threads)
+    return {
+        "scaleTargetRef": {"name": deployment_name},
+        "minReplicaCount": min_replicas,
+        "maxReplicaCount": max_replicas,
+        "pollingInterval": 15,
+        "cooldownPeriod": 60,
+        "advanced": {"horizontalPodAutoscalerConfig": {"behavior": keda_hpa_behavior()}},
+        "triggers": [
+            {
+                "type": "redis-streams",
+                "metadata": {
+                    "address": redis_address,
+                    "stream": stream,
+                    "consumerGroup": consumer_group,
+                    "lagCount": str(lag_count),
+                },
+            }
+        ],
+    }
+
 
 def _environment() -> str:
     return os.getenv("ENVIRONMENT", "dev")
@@ -202,11 +270,14 @@ class WorkerManagementService:
                 metadata = trigger.get("metadata") or {}
                 lag_threshold = int(metadata.get("lagCount", lag_threshold))
                 break
+        threads = get_job_execution_config().get_worker_threads()
         return {
             "enabled": True,
             "min_replicas": int(spec.get("minReplicaCount", 1)),
             "max_replicas": int(spec.get("maxReplicaCount", 10)),
             "lag_threshold": lag_threshold,
+            "horizon_waves": SCALE_HORIZON_WAVES,
+            "threads": threads,
             "keda_available": True,
         }
 
@@ -216,7 +287,9 @@ class WorkerManagementService:
             "enabled": False,
             "min_replicas": 1,
             "max_replicas": get_job_execution_config().get_worker_replicas_desired(),
-            "lag_threshold": 5,
+            "lag_threshold": two_wave_lag_count(get_job_execution_config().get_worker_threads()),
+            "horizon_waves": SCALE_HORIZON_WAVES,
+            "threads": get_job_execution_config().get_worker_threads(),
             "keda_available": keda_available,
         }
         scaled = self._autoscaling_from_scaled_object()
@@ -227,11 +300,14 @@ class WorkerManagementService:
             return defaults
         job_worker = (capability.get("spec") or {}).get("jobWorker") or {}
         autoscaling = job_worker.get("autoscaling") or {}
+        threads = get_job_execution_config().get_worker_threads()
         return {
             "enabled": bool(autoscaling.get("enabled", False)),
             "min_replicas": int(autoscaling.get("minReplicas", job_worker.get("replicas", 1))),
             "max_replicas": int(autoscaling.get("maxReplicas", 10)),
-            "lag_threshold": int(autoscaling.get("lagThreshold", 5)),
+            "lag_threshold": two_wave_lag_count(threads),
+            "horizon_waves": SCALE_HORIZON_WAVES,
+            "threads": threads,
             "keda_available": keda_available,
         }
 
@@ -290,6 +366,8 @@ class WorkerManagementService:
             # Drop stale Redis registrations left behind by replaced pods.
             if consumer_status == "stale" and pod_name not in pod_by_name:
                 continue
+            if pod.get("phase") == "Running" and consumer_status in ("idle", "healthy"):
+                consumer_status = "healthy"
             seen_pods.add(pod_name)
             rows.append(
                 {
@@ -313,7 +391,7 @@ class WorkerManagementService:
                 {
                     "worker_id": pod["worker_id"],
                     "consumer_name": None,
-                    "status": "offline" if pod.get("phase") != "Running" else "idle",
+                    "status": "healthy" if pod.get("phase") == "Running" else "offline",
                     "pending_jobs": 0,
                     "idle_ms": 0,
                     "current_job": None,
@@ -345,6 +423,60 @@ class WorkerManagementService:
             raise RuntimeError(f"Failed to scale deployment {dep_name}: {exc.reason}") from exc
         return self._deployment_status()
 
+    def patch_worker_env(self, updates: Dict[str, str]) -> Dict[str, Any]:
+        """Set env vars on the job-worker deployment. Pods roll to pick them up."""
+        if not self._apps_api or not client:
+            raise RuntimeError("Kubernetes Apps API unavailable; cannot update worker env")
+        dep_name = _worker_deployment_name()
+        ns = _namespace()
+        dep = self._apps_api.read_namespaced_deployment(name=dep_name, namespace=ns)
+        containers = dep.spec.template.spec.containers or []
+        if not containers:
+            raise RuntimeError(f"Deployment {dep_name} has no containers")
+        container = containers[0]
+        env_list = list(container.env or [])
+        by_name = {item.name: item for item in env_list}
+        for key, value in updates.items():
+            if key in by_name:
+                by_name[key].value = str(value)
+            else:
+                env_list.append(client.V1EnvVar(name=key, value=str(value)))
+                by_name[key] = env_list[-1]
+        container.env = list(by_name.values())
+        try:
+            self._apps_api.patch_namespaced_deployment(name=dep_name, namespace=ns, body=dep)
+        except ApiException as exc:
+            raise RuntimeError(f"Failed to patch worker env on {dep_name}: {exc.reason}") from exc
+        return {"deployment": dep_name, "updated": list(updates.keys())}
+
+    def _keda_autoscaling_active(self) -> bool:
+        return self._get_scaled_object() is not None
+
+    def _sync_keda_floor_replicas(self, replicas: int) -> bool:
+        """Align KEDA min replicas with manual scale so HPA does not revert the count."""
+        scaled = self._get_scaled_object()
+        if not scaled:
+            return False
+        if replicas <= 0:
+            self._reconcile_keda_autoscaling(
+                enabled=False,
+                min_replicas=0,
+                max_replicas=0,
+                lag_threshold=two_wave_lag_count(get_job_execution_config().get_worker_threads()),
+            )
+            return True
+
+        spec = scaled.get("spec") or {}
+        max_replicas = int(spec.get("maxReplicaCount", 10))
+        max_replicas = max(max_replicas, replicas)
+        self._reconcile_keda_autoscaling(
+            enabled=True,
+            min_replicas=replicas,
+            max_replicas=max_replicas,
+            lag_threshold=two_wave_lag_count(get_job_execution_config().get_worker_threads()),
+        )
+        return True
+
     def scale_workers(self, replicas: int) -> Dict[str, Any]:
         if not self._custom_api:
             raise RuntimeError("Kubernetes API unavailable; cannot scale workers")
@@ -356,6 +488,7 @@ class WorkerManagementService:
             raise RuntimeError("NexusCapability not found in namespace")
 
         name = capability["metadata"]["name"]
+        keda_synced = self._sync_keda_floor_replicas(replicas)
         deployment = self._patch_deployment_replicas(replicas)
 
         # Keep CR in sync when jobWorker is configured (operator-managed clusters).
@@ -384,6 +517,7 @@ class WorkerManagementService:
             "replicas": replicas,
             "capability": name,
             "deployment": deployment,
+            "keda_synced": keda_synced,
         }
 
     def _reconcile_keda_autoscaling(
@@ -413,6 +547,15 @@ class WorkerManagementService:
                     raise
             return
 
+        cfg = get_job_execution_config()
+        spec = build_scaled_object_spec(
+            deployment_name=_worker_deployment_name(),
+            min_replicas=min_replicas,
+            max_replicas=max_replicas,
+            redis_address=_redis_address_for_keda(),
+            threads=cfg.get_worker_threads(),
+            max_global_jobs=cfg.get_max_global_jobs(),
+        )
         body = {
             "apiVersion": f"{KEDA_GROUP}/{KEDA_VERSION}",
             "kind": "ScaledObject",
@@ -420,25 +563,10 @@ class WorkerManagementService:
                 "name": name,
                 "namespace": _namespace(),
             },
-            "spec": {
-                "scaleTargetRef": {"name": _worker_deployment_name()},
-                "minReplicaCount": min_replicas,
-                "maxReplicaCount": max_replicas,
-                "pollingInterval": 15,
-                "cooldownPeriod": 60,
-                "triggers": [
-                    {
-                        "type": "redis-streams",
-                        "metadata": {
-                            "address": _redis_address_for_keda(),
-                            "stream": JOB_STREAM_KEY,
-                            "consumerGroup": JOB_CONSUMER_GROUP,
-                            "lagCount": str(lag_threshold),
-                        },
-                    }
-                ],
-            },
+            "spec": spec,
         }
+        lag_threshold = int(spec["triggers"][0]["metadata"]["lagCount"])
+        max_replicas = int(spec["maxReplicaCount"])
         try:
             self._custom_api.create_namespaced_custom_object(
                 group=KEDA_GROUP,
@@ -476,6 +604,12 @@ class WorkerManagementService:
 
         if max_replicas < min_replicas:
             raise ValueError("max_replicas must be >= min_replicas")
+
+        cfg = get_job_execution_config()
+        lag_threshold = two_wave_lag_count(cfg.get_worker_threads())
+        max_replicas = useful_max_replicas(
+            max_replicas, min_replicas, cfg.get_max_global_jobs(), cfg.get_worker_threads()
+        )
 
         self._reconcile_keda_autoscaling(
             enabled=enabled,
@@ -515,7 +649,37 @@ class WorkerManagementService:
             "min_replicas": min_replicas,
             "max_replicas": max_replicas,
             "lag_threshold": lag_threshold,
+            "horizon_waves": SCALE_HORIZON_WAVES,
+            "threads": cfg.get_worker_threads(),
             "capability": name,
+        }
+
+    def sync_two_wave_autoscaling(self) -> Optional[Dict[str, Any]]:
+        """Re-apply two-wave lag + HPA step limits if a ScaledObject already exists."""
+        if not self._k8s_ready or not self._keda_autoscaling_active():
+            return None
+        scaled = self._get_scaled_object() or {}
+        spec = scaled.get("spec") or {}
+        min_replicas = int(spec.get("minReplicaCount", 1))
+        max_replicas = int(spec.get("maxReplicaCount", 10))
+        cfg = get_job_execution_config()
+        self._reconcile_keda_autoscaling(
+            enabled=True,
+            min_replicas=min_replicas,
+            max_replicas=max_replicas,
+            lag_threshold=two_wave_lag_count(cfg.get_worker_threads()),
+        )
+        logger.info(
+            "Synced two-wave autoscaling (lagCount={}, min={}, max={})",
+            two_wave_lag_count(cfg.get_worker_threads()),
+            min_replicas,
+            max_replicas,
+        )
+        return {
+            "synced": True,
+            "min_replicas": min_replicas,
+            "max_replicas": max_replicas,
+            "lag_threshold": two_wave_lag_count(cfg.get_worker_threads()),
         }
 
 

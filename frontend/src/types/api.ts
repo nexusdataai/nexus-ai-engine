@@ -71,12 +71,31 @@ export type ToolDescriptor = {
 };
 
 export type ScheduleRow = {
-  schedule_id: string;
-  journey_id: string;
-  stage_id: string;
-  interval_minutes: number;
+  scheduleId: string;
+  journeyId: string;
+  stageId?: string;
+  intervalMinutes: number;
   enabled: boolean;
   timezone?: string;
+  lastRunAt?: string | null;
+  nextRunAt?: string | null;
+  lastJobId?: string | null;
+  lastJobStatus?: string | null;
+  createdAt?: string;
+  createdBy?: string;
+};
+
+export type ArchivedJobRow = {
+  job_id: string;
+  journey_id?: string;
+  execution_number?: number | string;
+  stage_id?: string;
+  stage_name?: string;
+  status?: string;
+  start_time?: string;
+  end_time?: string;
+  duration?: number | string;
+  triggered_by?: string;
 };
 
 export type FleetSummary = {
@@ -131,6 +150,8 @@ export type QueueSummary = {
   queued: number;
   max_global: number;
   consumer_count: number;
+  worker_threads?: number;
+  running_capacity?: number;
   generated_at: string;
 };
 
@@ -157,6 +178,50 @@ export type WorkerRow = {
   last_seen: string;
 };
 
+export type EngineSettings = {
+  workers: {
+    replicas?: number;
+    desired?: number;
+    ready?: number;
+    max_replicas?: number;
+    threads: number;
+    threads_min: number;
+    threads_max: number;
+    k8s_available?: boolean;
+    autoscaling?: {
+      enabled: boolean;
+      min_replicas: number;
+      max_replicas: number;
+      lag_threshold: number;
+      horizon_waves?: number;
+      threads?: number;
+      keda_available?: boolean;
+    };
+  };
+  queue: {
+    mode: string;
+    redis_available: boolean;
+    max_global_jobs: number;
+    min_global_jobs: number;
+    max_global_jobs_cap: number;
+    stream_key: string;
+    consumer_group: string;
+  };
+  scheduler: {
+    running: boolean;
+    schedule_count: number;
+    enabled_count: number;
+    check_interval_sec: number;
+  };
+  version: {
+    name: string;
+    version: string;
+    env: string;
+    git_sha?: string;
+  };
+  notes?: string[];
+};
+
 export type WorkersSummary = {
   queue_mode: boolean;
   redis_available: boolean;
@@ -178,6 +243,8 @@ export type WorkersSummary = {
     min_replicas: number;
     max_replicas: number;
     lag_threshold: number;
+    horizon_waves?: number;
+    threads?: number;
     keda_available: boolean;
   };
   max_worker_replicas: number;

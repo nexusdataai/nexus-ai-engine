@@ -15,7 +15,7 @@ router = APIRouter()
 
 class CreateScheduleRequest(BaseModel):
     journey_id: str
-    stage_id: str
+    stage_id: Optional[str] = None
     interval_minutes: int = Field(..., ge=1, le=1440)
     enabled: bool = True
     timezone: str = 'UTC'
@@ -25,6 +25,18 @@ class UpdateScheduleRequest(BaseModel):
     interval_minutes: Optional[int] = Field(None, ge=1, le=1440)
     enabled: Optional[bool] = None
     timezone: Optional[str] = None
+
+
+_UPDATE_FIELD_MAP = {
+    "interval_minutes": "intervalMinutes",
+    "enabled": "enabled",
+    "timezone": "timezone",
+}
+
+
+def map_schedule_updates(raw: dict) -> dict:
+    """Map snake_case request fields to SchedulerService camelCase keys."""
+    return {_UPDATE_FIELD_MAP.get(key, key): value for key, value in raw.items()}
 
 
 def _get_service() -> SchedulerService:
@@ -64,7 +76,7 @@ async def get_schedule(schedule_id: str):
 @router.put("/{schedule_id}")
 async def update_schedule(schedule_id: str, req: UpdateScheduleRequest):
     svc = _get_service()
-    updates = req.model_dump(exclude_none=True)
+    updates = map_schedule_updates(req.model_dump(exclude_none=True))
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
     schedule = svc.update_schedule(schedule_id, updates)

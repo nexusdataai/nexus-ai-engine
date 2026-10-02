@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
+import { RefreshCw } from "lucide-react";
 
 import { EmptyState } from "@/components/EmptyState";
 import { QueueVisualization } from "@/components/queue/QueueVisualization";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useQueueSnapshot } from "@/hooks/useQueueSnapshot";
-import { truncateId } from "@/lib/utils";
+import { cn, truncateId } from "@/lib/utils";
 import type { QueueJob } from "@/types/api";
 
 function jobHref(job: QueueJob): string {
@@ -16,7 +18,7 @@ function jobHref(job: QueueJob): string {
 }
 
 export function QueuePage() {
-  const { summary, jobs } = useQueueSnapshot();
+  const { summary, jobs, live, refresh } = useQueueSnapshot();
 
   if (summary.isError || jobs.isError) {
     const message =
@@ -51,11 +53,42 @@ export function QueuePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Job Queue</h2>
-        <p className="text-sm text-muted-foreground">
-          Live view of waiting, claimed, and running jobs in the Redis stream pipeline.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">Job Queue</h2>
+          <p className="text-sm text-muted-foreground">
+            Live view of waiting, claimed, and running jobs in the Redis stream pipeline.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs",
+              live
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-border text-muted-foreground",
+            )}
+            data-testid="queue-sse-status"
+          >
+            <span
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                live ? "bg-emerald-400 animate-pulse" : "bg-muted-foreground",
+              )}
+            />
+            {live ? "Live SSE" : "Polling"}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void refresh()}
+            data-testid="queue-refresh"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -64,7 +97,11 @@ export function QueuePage() {
             <CardTitle className="text-sm font-medium">Waiting</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{summary.isLoading ? "…" : (snap?.lag ?? 0)}</p>
+            <p className="text-3xl font-bold">
+              {jobs.isLoading
+                ? "…"
+                : rows.filter((j) => j.state === "waiting").length}
+            </p>
           </CardContent>
         </Card>
         <Card>

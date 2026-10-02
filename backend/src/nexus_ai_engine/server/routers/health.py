@@ -8,11 +8,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
-from ... import __version__
 from ...config import get_config
 from ...execution import InMemoryEngine
+from ...runtime_version import deployed_git_sha, deployed_version
 from ...stages import list_available_stages
-from ..observability import git_sha
 
 router = APIRouter()
 
@@ -82,7 +81,7 @@ def readiness_payload(engine: Any | None) -> tuple[dict[str, Any], bool]:
     )
     body = {
         "ready": ready,
-        "version": __version__,
+        "version": deployed_version(),
         "checks": checks,
     }
     return body, ready
@@ -90,7 +89,7 @@ def readiness_payload(engine: Any | None) -> tuple[dict[str, Any], bool]:
 
 @router.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": __version__}
+    return {"status": "ok", "version": deployed_version()}
 
 
 @router.get("/readiness")
@@ -106,9 +105,9 @@ async def version() -> dict[str, str]:
     return {
         "name": "nexus-ai-engine",
         "service": "nexus-ai-engine",
-        "version": __version__,
+        "version": deployed_version(),
         "env": config.environment,
-        "git_sha": git_sha(),
+        "git_sha": deployed_git_sha(),
     }
 
 

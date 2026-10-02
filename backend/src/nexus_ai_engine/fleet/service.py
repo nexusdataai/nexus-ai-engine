@@ -33,6 +33,23 @@ def _parse_window_hours(raw: str | None) -> int:
     return max(1, min(hours, 168))
 
 
+def _parse_job_time(raw: Any) -> datetime | None:
+    if raw is None:
+        return None
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    text = str(raw).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 def _percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
@@ -93,7 +110,50 @@ class FleetMonitorService:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
 
+    def _queue_job_workers(self) -> list[dict[str, Any]] | None:
+        """Job-worker consumers/pods when running in Redis queue mode.
+
+        Returns None in inline mode so the API hostname + DSL locks remain
+        the worker list. Returns [] (not None) in queue mode with no workers
+        so the dashboard does not fall back to counting the API pod.
+        """
+        try:
+            from nexus_ai_engine.services.job_queue_service import is_queue_mode
+
+            if not is_queue_mode():
+                return None
+            from nexus_ai_engine.services.worker_management_service import (
+                get_worker_management_service,
+            )
+
+            payload = get_worker_management_service().list_workers()
+        except Exception:
+            return None
+
+        rows: list[dict[str, Any]] = []
+        for worker in payload.get("workers") or []:
+            current = worker.get("current_job") or {}
+            rows.append(
+                {
+                    "worker_id": worker.get("worker_id") or worker.get("consumer_name") or "unknown",
+                    "role": "job-worker",
+                    "status": worker.get("status") or "offline",
+                    "active_tasks": 1 if current.get("job_id") else 0,
+                    "execution_id": current.get("job_id"),
+                    "last_seen": worker.get("last_seen")
+                    or datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        return rows
+
     async def workers(self) -> dict[str, Any]:
+        queue_rows = self._queue_job_workers()
+        if queue_rows is not None:
+            return {
+                "workers": queue_rows,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
         now = int(time.time())
         rows: list[dict[str, Any]] = [
             {
@@ -125,6 +185,33 @@ class FleetMonitorService:
 
         return {"workers": rows, "generated_at": datetime.now(timezone.utc).isoformat()}
 
+    def _stage_job_throughput(self, cutoff: datetime) -> tuple[int, int, int]:
+        """Count transformation/stage jobs in the window (not just DSL executions)."""
+        from nexus_ai_engine.adapters.dynamodb.journey_manager import (
+            ComprehensiveJourneyManager,
+        )
+
+        manager = ComprehensiveJourneyManager()
+        submitted = succeeded = failed = 0
+        for journey in manager.list_journeys() or []:
+            journey_id = journey.get("journeyId") or journey.get("journey_id")
+            if not journey_id:
+                continue
+            for job in manager.list_jobs(str(journey_id), limit=200):
+                started = _parse_job_time(job.get("startTime") or job.get("started_at"))
+                finished = _parse_job_time(job.get("endTime") or job.get("finished_at"))
+                status = str(job.get("status") or "").lower()
+                if started and started >= cutoff:
+                    submitted += 1
+                stamp = finished or started
+                if stamp is None or stamp < cutoff:
+                    continue
+                if status in ("completed", "succeeded", "success"):
+                    succeeded += 1
+                elif status in ("failed", "error"):
+                    failed += 1
+        return submitted, succeeded, failed
+
     async def metrics(self, *, window: str | None = "24h") -> dict[str, Any]:
         hours = _parse_window_hours(window)
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -133,6 +220,14 @@ class FleetMonitorService:
         submitted = succeeded = failed = 0
         latencies_ms: list[float] = []
         hourly: dict[str, dict[str, int]] = {}
+
+        try:
+            stage_submitted, stage_succeeded, stage_failed = self._stage_job_throughput(cutoff)
+            submitted += stage_submitted
+            succeeded += stage_succeeded
+            failed += stage_failed
+        except Exception:
+            pass
 
         for state in states:
             started = state.started_at

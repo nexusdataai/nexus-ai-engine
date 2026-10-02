@@ -17,6 +17,8 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://redis-svc:6379/0")
 JOB_STREAM_KEY = os.getenv("JOB_STREAM_KEY", "ai-engine:jobs")
 JOB_CONSUMER_GROUP = os.getenv("JOB_CONSUMER_GROUP", "ai-engine-workers")
 JOB_ACTIVE_COUNTER_KEY = os.getenv("JOB_ACTIVE_COUNTER_KEY", "ai-engine:jobs:active")
+JOB_WAITING_SET_KEY = os.getenv("JOB_WAITING_SET_KEY", "ai-engine:jobs:waiting")
+JOB_CANCELLED_SET_KEY = os.getenv("JOB_CANCELLED_SET_KEY", "ai-engine:jobs:cancelled")
 
 try:
     import redis as redis_sync
@@ -44,6 +46,31 @@ def get_max_global_jobs() -> int:
     from .job_execution_config_service import get_job_execution_config
 
     return get_job_execution_config().get_max_global_jobs()
+
+
+def get_worker_threads() -> int:
+    from .job_execution_config_service import get_job_execution_config
+
+    return get_job_execution_config().get_worker_threads()
+
+
+def get_live_consumer_count() -> int:
+    """Consumers that are not idle-and-empty (old pods leave stale XINFO entries)."""
+    try:
+        consumers = _client().xinfo_consumers(JOB_STREAM_KEY, JOB_CONSUMER_GROUP)
+        live = 0
+        for consumer in consumers or []:
+            idle_ms = int(consumer.get("idle") or 0)
+            pending = int(consumer.get("pending") or 0)
+            if consumer_health(idle_ms, pending) != "stale":
+                live += 1
+        return live
+    except Exception:
+        return get_consumer_count()
+
+
+def get_running_capacity() -> int:
+    return min(get_max_global_jobs(), get_live_consumer_count() * get_worker_threads())
 
 
 def is_queue_mode() -> bool:
@@ -99,24 +126,65 @@ def get_active_job_count() -> int:
         return 0
 
 
+def _undelivered_count(last_delivered_id: str, limit: int = 1000) -> int:
+    last_id = last_delivered_id or "0-0"
+    try:
+        if last_id in ("0-0", "0", ""):
+            return int(_client().xlen(JOB_STREAM_KEY) or 0)
+        entries = _client().xrange(
+            JOB_STREAM_KEY,
+            min=f"({last_id}",
+            max="+",
+            count=limit,
+        )
+        return len(entries or [])
+    except Exception:
+        return 0
+
+
+def _mark_waiting(stream_id: str) -> None:
+    try:
+        _client().sadd(JOB_WAITING_SET_KEY, stream_id)
+    except Exception as exc:
+        logger.warning("Failed to record waiting job %s: %s", stream_id, exc)
+
+
+def _unmark_waiting(stream_id: str) -> None:
+    try:
+        _client().srem(JOB_WAITING_SET_KEY, stream_id)
+    except Exception as exc:
+        logger.warning("Failed to clear waiting job %s: %s", stream_id, exc)
+
+
+def get_waiting_count() -> int:
+    try:
+        return int(_client().scard(JOB_WAITING_SET_KEY) or 0)
+    except Exception:
+        return get_consumer_lag()
+
+
 def get_consumer_lag() -> int:
-    """Messages in the stream not yet delivered to the consumer group."""
+    """Messages in the stream not yet delivered to the consumer group.
+
+    Redis 7+ exposes XINFO GROUPS ``lag``. Redis 6 does not — fall back to
+    counting entries after ``last-delivered-id`` so waiting jobs stay visible.
+    """
     try:
         groups = _client().xinfo_groups(JOB_STREAM_KEY)
         for group in groups or []:
-            if group.get("name") == JOB_CONSUMER_GROUP:
+            if group.get("name") != JOB_CONSUMER_GROUP:
+                continue
+            if "lag" in group and group.get("lag") is not None:
                 return int(group.get("lag") or 0)
-        return 0
+            return _undelivered_count(str(group.get("last-delivered-id") or "0-0"))
+        return int(_client().xlen(JOB_STREAM_KEY) or 0)
     except Exception:
         return 0
 
 
 def get_stage_jobs_queued() -> int:
     """Stage/DSL jobs waiting in Redis (not actively executing)."""
-    lag = get_consumer_lag()
-    pending = get_pending_count()
-    active = get_active_job_count()
-    return max(0, lag + pending - active)
+    return get_waiting_count()
 
 
 def get_consumer_count() -> int:
@@ -175,7 +243,7 @@ def _job_to_dict(
 def get_queue_snapshot() -> Dict[str, Any]:
     from datetime import datetime, timezone
 
-    lag = get_consumer_lag()
+    lag = get_waiting_count()
     pending = get_pending_count()
     active = get_active_job_count()
     return {
@@ -185,6 +253,8 @@ def get_queue_snapshot() -> Dict[str, Any]:
         "queued": get_stage_jobs_queued(),
         "max_global": get_max_global_jobs(),
         "consumer_count": get_consumer_count(),
+        "worker_threads": get_worker_threads(),
+        "running_capacity": get_running_capacity(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -238,24 +308,61 @@ def list_pending_jobs(limit: int = 50) -> List[Dict[str, Any]]:
 
 
 def list_waiting_jobs(limit: int = 50) -> List[Dict[str, Any]]:
-    group = _group_info()
-    lag = int(group.get("lag") or 0)
-    if lag <= 0:
-        return []
+    """Unclaimed jobs. Prefers the waiting set written on enqueue."""
+    pending_ids = {j["stream_id"] for j in list_pending_jobs(limit=500)}
+    from_set = _list_waiting_from_set(limit, pending_ids)
+    if from_set:
+        return from_set
+    return _list_waiting_from_stream(limit, pending_ids)
 
-    last_id = group.get("last-delivered-id") or "0-0"
-    count = min(limit, lag)
+
+def _list_waiting_from_set(
+    limit: int, pending_ids: set[str]
+) -> List[Dict[str, Any]]:
     try:
-        entries = _client().xrange(
-            JOB_STREAM_KEY,
-            min=f"({last_id}",
-            max="+",
-            count=count,
-        )
+        raw = _client().smembers(JOB_WAITING_SET_KEY)
+    except Exception:
+        return []
+    if not isinstance(raw, (list, set, tuple, frozenset)):
+        return []
+    ids = sorted(str(item) for item in raw)
+    result: List[Dict[str, Any]] = []
+    for stream_id in ids:
+        if stream_id in pending_ids:
+            _unmark_waiting(stream_id)
+            continue
+        fields = _stream_entry_fields(stream_id)
+        if not fields:
+            _unmark_waiting(stream_id)
+            continue
+        job = _parse_queued_job(stream_id, fields)
+        enqueued_raw = fields.get("enqueued_at")
+        enqueued_at = int(enqueued_raw) if enqueued_raw and str(enqueued_raw).isdigit() else None
+        result.append(_job_to_dict(job, state="waiting", enqueued_at=enqueued_at))
+        if len(result) >= limit:
+            break
+    return result
+
+
+def _list_waiting_from_stream(
+    limit: int, pending_ids: set[str]
+) -> List[Dict[str, Any]]:
+    group = _group_info()
+    last_id = str(group.get("last-delivered-id") or "0-0")
+    fetch = max(limit, 1) + len(pending_ids)
+    try:
+        if last_id in ("0-0", "0", ""):
+            entries = _client().xrange(JOB_STREAM_KEY, min="-", max="+", count=fetch)
+        else:
+            entries = _client().xrange(
+                JOB_STREAM_KEY,
+                min=f"({last_id}",
+                max="+",
+                count=fetch,
+            )
     except Exception:
         return []
 
-    pending_ids = {j["stream_id"] for j in list_pending_jobs(limit=500)}
     result: List[Dict[str, Any]] = []
     for stream_id, fields in entries or []:
         if stream_id in pending_ids:
@@ -264,6 +371,8 @@ def list_waiting_jobs(limit: int = 50) -> List[Dict[str, Any]]:
         enqueued_raw = fields.get("enqueued_at")
         enqueued_at = int(enqueued_raw) if enqueued_raw and str(enqueued_raw).isdigit() else None
         result.append(_job_to_dict(job, state="waiting", enqueued_at=enqueued_at))
+        if len(result) >= limit:
+            break
     return result
 
 
@@ -319,6 +428,23 @@ def get_queue_timeline(limit: int = 30) -> List[Dict[str, Any]]:
     return timeline
 
 
+def consumer_health(idle_ms: int, pending_count: int) -> str:
+    """Map Redis consumer idle/pending to dashboard health.
+
+    XINFO idle is time since the last group command, not process liveness.
+    A worker executing a job does not call XREADGROUP, so idle_ms grows
+    while the pod is healthy and busy. Pending entries mean the worker
+    still owns work and must not be marked stale.
+    """
+    if pending_count > 0:
+        return "healthy"
+    if idle_ms > 120_000:
+        return "stale"
+    # Ready and recently active. The dashboard badge treats only
+    # "healthy" as up; "idle" rendered as Failed on the previous UI.
+    return "healthy"
+
+
 def list_consumers() -> List[Dict[str, Any]]:
     try:
         consumers = _client().xinfo_consumers(JOB_STREAM_KEY, JOB_CONSUMER_GROUP)
@@ -337,11 +463,7 @@ def list_consumers() -> List[Dict[str, Any]]:
         pending_count = int(consumer.get("pending") or 0)
         jobs = pending_by_consumer.get(name, [])
         current_job = jobs[0] if jobs else None
-        status = "healthy"
-        if idle_ms > 120_000:
-            status = "stale"
-        elif pending_count == 0:
-            status = "idle"
+        status = consumer_health(idle_ms, pending_count)
         rows.append(
             {
                 "consumer_name": name,
@@ -411,6 +533,30 @@ def _parse_queued_job(stream_id: str, fields: Dict[str, str]) -> QueuedJob:
     )
 
 
+def _stream_payload(
+    *,
+    job_id: str,
+    journey_id: str,
+    job_kind: JobKind = "transformation",
+    stage_id: str = "",
+    stage_ids: Optional[List[str]] = None,
+    triggered_by: str = "system",
+    reason: str = "",
+    job_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    return {
+        "job_id": job_id,
+        "journey_id": journey_id,
+        "job_kind": job_kind,
+        "stage_id": stage_id or "",
+        "stage_ids": json.dumps(stage_ids or []),
+        "triggered_by": triggered_by,
+        "reason": reason or "",
+        "job_config": json.dumps(job_config or {}),
+        "enqueued_at": str(int(time.time())),
+    }
+
+
 def enqueue_job(
     *,
     job_id: str,
@@ -423,20 +569,49 @@ def enqueue_job(
     job_config: Optional[Dict[str, Any]] = None,
 ) -> str:
     ensure_consumer_group()
-    payload = {
-        "job_id": job_id,
-        "journey_id": journey_id,
-        "job_kind": job_kind,
-        "stage_id": stage_id or "",
-        "stage_ids": json.dumps(stage_ids or []),
-        "triggered_by": triggered_by,
-        "reason": reason or "",
-        "job_config": json.dumps(job_config or {}),
-        "enqueued_at": str(int(time.time())),
-    }
-    stream_id = _client().xadd(JOB_STREAM_KEY, payload)
+    stream_id = _client().xadd(
+        JOB_STREAM_KEY,
+        _stream_payload(
+            job_id=job_id,
+            journey_id=journey_id,
+            job_kind=job_kind,
+            stage_id=stage_id,
+            stage_ids=stage_ids,
+            triggered_by=triggered_by,
+            reason=reason,
+            job_config=job_config,
+        ),
+    )
+    _mark_waiting(stream_id)
     logger.info("Enqueued %s job %s on stream %s", job_kind, job_id, stream_id)
     return stream_id
+
+
+def enqueue_jobs(jobs: List[Dict[str, Any]]) -> List[str]:
+    """XADD every job in one pipeline so the waiting set fills before workers claim."""
+    if not jobs:
+        return []
+    ensure_consumer_group()
+    pipe = _client().pipeline()
+    for job in jobs:
+        pipe.xadd(
+            JOB_STREAM_KEY,
+            _stream_payload(
+                job_id=str(job.get("job_id") or ""),
+                journey_id=str(job.get("journey_id") or ""),
+                job_kind=job.get("job_kind") or "transformation",
+                stage_id=str(job.get("stage_id") or ""),
+                stage_ids=job.get("stage_ids") or [],
+                triggered_by=str(job.get("triggered_by") or "system"),
+                reason=str(job.get("reason") or ""),
+                job_config=job.get("job_config") or {},
+            ),
+        )
+    stream_ids = [str(sid) for sid in (pipe.execute() or []) if sid]
+    if stream_ids:
+        _client().sadd(JOB_WAITING_SET_KEY, *stream_ids)
+    logger.info("Enqueued %s jobs onto the wait stream", len(stream_ids))
+    return stream_ids
 
 
 def claim_job(consumer_name: str, block_ms: int = 5000) -> Optional[QueuedJob]:
@@ -452,14 +627,60 @@ def claim_job(consumer_name: str, block_ms: int = 5000) -> Optional[QueuedJob]:
         return None
     _stream_name, messages = entries[0]
     stream_id, fields = messages[0]
+    _unmark_waiting(stream_id)
     return _parse_queued_job(stream_id, fields)
 
 
 def ack_job(stream_id: str) -> None:
+    _unmark_waiting(stream_id)
     _client().xack(JOB_STREAM_KEY, JOB_CONSUMER_GROUP, stream_id)
 
 
-def reclaim_stale_jobs(consumer_name: str, min_idle_ms: int = 120_000) -> List[QueuedJob]:
+def mark_job_cancelled(job_id: str) -> None:
+    try:
+        _client().sadd(JOB_CANCELLED_SET_KEY, job_id)
+    except Exception as exc:
+        logger.warning("Failed to mark job %s cancelled: %s", job_id, exc)
+
+
+def is_cancel_requested(job_id: str) -> bool:
+    try:
+        return bool(_client().sismember(JOB_CANCELLED_SET_KEY, job_id))
+    except Exception:
+        return False
+
+
+def drop_queue_job(job_id: str) -> int:
+    """Remove a job from the wait/pending stream so workers do not pick it up."""
+    mark_job_cancelled(job_id)
+    removed = 0
+    try:
+        for row in list_queue_jobs(state="all", limit=200):
+            if row.get("job_id") != job_id:
+                continue
+            stream_id = str(row.get("stream_id") or "")
+            if not stream_id:
+                continue
+            _unmark_waiting(stream_id)
+            try:
+                _client().xack(JOB_STREAM_KEY, JOB_CONSUMER_GROUP, stream_id)
+            except Exception:
+                pass
+            try:
+                _client().xdel(JOB_STREAM_KEY, stream_id)
+            except Exception:
+                pass
+            removed += 1
+    except Exception as exc:
+        logger.warning("Failed to drop queue job %s: %s", job_id, exc)
+    return removed
+
+
+def reclaim_stale_jobs(
+    consumer_name: str, min_idle_ms: int = 120_000, limit: int = 10
+) -> List[QueuedJob]:
+    if limit <= 0:
+        return []
     ensure_consumer_group()
     client = _client()
     reclaimed: List[QueuedJob] = []
@@ -469,12 +690,14 @@ def reclaim_stale_jobs(consumer_name: str, min_idle_ms: int = 120_000) -> List[Q
             JOB_CONSUMER_GROUP,
             min="-",
             max="+",
-            count=10,
+            count=max(limit, 10),
         )
     except Exception:
         return reclaimed
 
     for item in pending or []:
+        if len(reclaimed) >= limit:
+            break
         stream_id = item["message_id"]
         idle_ms = item.get("time_since_delivered", 0)
         if idle_ms < min_idle_ms:
@@ -490,6 +713,9 @@ def reclaim_stale_jobs(consumer_name: str, min_idle_ms: int = 120_000) -> List[Q
         except Exception:
             continue
         for msg_id, fields in claimed or []:
+            if len(reclaimed) >= limit:
+                break
+            _unmark_waiting(msg_id)
             reclaimed.append(_parse_queued_job(msg_id, fields))
     return reclaimed
 

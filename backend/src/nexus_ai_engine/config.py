@@ -53,7 +53,7 @@ class EngineConfig:
     job_consumer_group: str = "ai-engine-workers"
     job_active_counter_key: str = "ai-engine:jobs:active"
     job_execution_mode: Literal["inline", "queue"] = "inline"
-    max_global_jobs: int = 10
+    max_global_jobs: int = 50
     sse_redis_enabled: bool = True
     job_worker_health_port: int = 8081
 
@@ -138,7 +138,7 @@ def config_from_environment() -> EngineConfig:
         job_execution_mode=(
             "queue" if os.getenv("JOB_EXECUTION_MODE", "inline").lower() == "queue" else "inline"
         ),
-        max_global_jobs=int(os.getenv("MAX_GLOBAL_JOBS", os.getenv("MAX_CONCURRENT_JOBS", "10"))),
+        max_global_jobs=int(os.getenv("MAX_GLOBAL_JOBS", os.getenv("MAX_CONCURRENT_JOBS", "50"))),
         sse_redis_enabled=os.getenv("SSE_REDIS_ENABLED", "true").lower() not in ("0", "false", "no"),
         job_worker_health_port=int(os.getenv("JOB_WORKER_HEALTH_PORT", "8081")),
         capability_name=cap,

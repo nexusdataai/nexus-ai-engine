@@ -26,13 +26,18 @@ from .routers import jobs as jobs_router
 from .routers import journey_dsl_api as journey_dsl_router
 from .routers import journeys as journeys_router
 from .routers import logs as logs_router
+from .routers import monitoring as monitoring_router
 from .routers import prompts as prompts_router
 from .routers import queue as queue_router
 from .routers import reports as reports_router
 from .routers import schedules as schedules_router
+from .routers import settings as settings_router
 from .routers import stages_registry as stages_registry_router
 from .routers import tool_packages as tool_packages_router
 from .routers import ui as ui_router
+from .routers import diagnostics as diagnostics_router
+from .routers import dlq as dlq_router
+from .routers import runbooks as runbooks_router
 from .routers import workers as workers_router
 from .observability import build_metrics_registry
 
@@ -58,8 +63,43 @@ def _local_demo_seed_lifespan(engine: Optional[Any]):
             engine.execution_runtime.sse.enable_redis_bridge(publish_only=False)
         start_stale_job_sweeper()
         await sse_manager.start_cleanup_task()
+        try:
+            from ..services.worker_management_service import get_worker_management_service
+
+            get_worker_management_service().sync_two_wave_autoscaling()
+        except Exception:
+            logger.exception("Two-wave autoscaling sync failed")
+
+        try:
+            from ..services.sla_monitoring_service import get_sla_monitoring_service
+
+            sla_svc = get_sla_monitoring_service()
+            sla_svc.bind_engine(engine)
+            await sla_svc.start_periodic()
+            from ..services.app_trends_service import get_app_trends_service
+
+            get_app_trends_service().bind_engine(engine)
+        except Exception:
+            logger.exception("SLA monitoring start failed")
 
         from ..factory import Engine
+
+        if isinstance(engine, Engine):
+            from ..services.scheduler_service import SchedulerService
+
+            try:
+                await SchedulerService.get_instance().start()
+            except Exception:
+                logger.exception("SchedulerService start failed")
+
+            try:
+                from ..services.demo_seed import seed_job_archival_journey
+
+                archival = await seed_job_archival_journey(engine.journeys)
+                if archival:
+                    logger.info("Seeded Job Archival journey")
+            except Exception:
+                logger.exception("Job archival journey seed failed on startup")
 
         if isinstance(engine, Engine) and engine.config.environment == "local":
             seed_on = os.environ.get("SEED_DEMO_JOURNEYS", "true").lower() not in (
@@ -69,15 +109,28 @@ def _local_demo_seed_lifespan(engine: Optional[Any]):
                 "off",
             )
             if seed_on:
-                from ..services.demo_seed import seed_demo_journeys_if_empty
+                from ..services.demo_seed import seed_missing_demo_journeys
 
                 try:
-                    created = await seed_demo_journeys_if_empty(engine.journeys)
+                    created = await seed_missing_demo_journeys(engine.journeys)
                     if created:
                         logger.info("Seeded %d demo journeys for local persisted dev", created)
                 except Exception:
                     logger.exception("Demo journey seed failed on startup")
         yield
+        if isinstance(engine, Engine):
+            try:
+                from ..services.scheduler_service import SchedulerService
+
+                await SchedulerService.get_instance().stop()
+            except Exception:
+                logger.exception("SchedulerService stop failed")
+        try:
+            from ..services.sla_monitoring_service import get_sla_monitoring_service
+
+            await get_sla_monitoring_service().stop()
+        except Exception:
+            logger.exception("SLA monitoring stop failed")
         await sse_manager.stop_cleanup_task()
 
     return _lifespan
@@ -127,6 +180,10 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
     app.state.engine = engine
     app.state.metrics_registry = build_metrics_registry()
 
+    from .request_metrics import RequestMetricsMiddleware
+
+    app.add_middleware(RequestMetricsMiddleware)
+
     if cors_origins:
         app.add_middleware(
             CORSMiddleware,
@@ -147,6 +204,11 @@ def create_app(engine: Optional[Any] = None, *, cors_origins: Optional[list[str]
     app.include_router(fleet_router.router, prefix=API_V1_PREFIX, tags=["fleet"])
     app.include_router(queue_router.router, prefix=API_V1_PREFIX, tags=["queue"])
     app.include_router(workers_router.router, prefix=API_V1_PREFIX, tags=["workers"])
+    app.include_router(settings_router.router, prefix=API_V1_PREFIX, tags=["settings"])
+    app.include_router(monitoring_router.router, prefix=API_V1_PREFIX, tags=["monitoring"])
+    app.include_router(diagnostics_router.router, prefix=API_V1_PREFIX, tags=["diagnostics"])
+    app.include_router(runbooks_router.router, prefix=API_V1_PREFIX, tags=["runbooks"])
+    app.include_router(dlq_router.router, prefix=API_V1_PREFIX, tags=["dlq"])
 
     # Engine surface — branch on engine kind. The InMemoryEngine path is the
     # default (no DynamoDB config supplied); the production path activates

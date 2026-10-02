@@ -42,17 +42,19 @@ set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8000}"
 FORCE="false"
+APPEND="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force)    FORCE="true"; shift ;;
+        --append)   APPEND="true"; shift ;;
         --base)     BASE_URL="$2"; shift 2 ;;
         --help|-h)
             sed -n '3,40p' "$0"
             exit 0 ;;
         *)
             echo "Unknown arg: $1" >&2
-            echo "Usage: $0 [--base http://host:port] [--force]" >&2
+            echo "Usage: $0 [--base http://host:port] [--force] [--append]" >&2
             exit 2 ;;
     esac
 done
@@ -82,11 +84,23 @@ echo "  version: ${version_body}"
 # ── Optional safety: bail if journeys already exist ─────────────────────
 existing_count=$(curl -fsS -m 5 "${BASE_URL}/api/v1/journeys/" \
     | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("total", len(d) if isinstance(d, list) else 0))')
-if [[ "$existing_count" != "0" && "$FORCE" != "true" ]]; then
+if [[ "$existing_count" != "0" && "$FORCE" != "true" && "$APPEND" != "true" ]]; then
     echo
-    echo "Journeys already exist (total=${existing_count}). Pass --force to seed anyway."
+    echo "Journeys already exist (total=${existing_count}). Pass --force to seed anyway or --append for missing only."
     echo "View existing: ${BASE_URL}/ui#/"
     exit 0
+fi
+
+existing_names=""
+if [[ "$APPEND" == "true" ]]; then
+    existing_names=$(curl -fsS -m 5 "${BASE_URL}/api/v1/journeys/" | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+items = d.get("data") or d.get("journeys") or (d if isinstance(d, list) else [])
+for row in items:
+    if isinstance(row, dict) and row.get("name"):
+        print(row["name"])
+')
 fi
 
 # ── Fetch canonical definitions from the library ────────────────────────
@@ -105,6 +119,10 @@ echo "Creating ${journey_count} sample journeys (canonical definitions from nexu
 
 while IFS=$'\t' read -r jname jpayload jstages_json; do
     [[ -z "$jname" ]] && continue
+    if [[ "$APPEND" == "true" ]] && printf '%s\n' "$existing_names" | grep -Fxq "$jname"; then
+        printf "  · %-32s  skipped (exists)\n" "$jname"
+        continue
+    fi
 
     # Pass 1: create the journey
     resp=$(curl -sS -o /tmp/_seed_resp -w '%{http_code}' \

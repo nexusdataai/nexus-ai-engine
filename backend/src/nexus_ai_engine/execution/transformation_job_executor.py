@@ -3,6 +3,7 @@ import boto3
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 import inspect
@@ -28,20 +29,71 @@ except ImportError:
     def emit_job_complete(*args, **kwargs): pass
 
 
+_STAGE_ORDER_MAP = {
+    'raw_analysis': 0,
+    'stripped_schema': 1,
+    'data_mapping': 2,
+    'compliance_validation': 3,
+    'business_rules': 4,
+    'integration_testing': 5,
+}
+
+
+def _peek_stage_class(stage_class, stage_id: str) -> Optional[Dict]:
+    """Read step metadata from class attributes so job create does not open AWS clients."""
+    defs = getattr(stage_class, 'STEP_DEFINITIONS', None)
+    if not defs:
+        return None
+    steps = []
+    for step in defs:
+        if not isinstance(step, dict) or not step.get('id'):
+            continue
+        steps.append({
+            'id': step['id'],
+            'name': step.get('name', step['id']),
+            'description': step.get('description', ''),
+        })
+    if not steps:
+        return None
+    return {
+        'stage_id': stage_id,
+        'stage_name': getattr(stage_class, 'STAGE_NAME', stage_id),
+        'stage_description': getattr(stage_class, 'STAGE_DESCRIPTION', ''),
+        'steps': steps,
+        'order': _STAGE_ORDER_MAP.get(stage_id, 99),
+        'class_name': stage_class.__name__,
+    }
+
+
 class JobCancelledException(Exception):
     pass
 
 
 class TransformationJobExecutor:
     _cancelled_jobs: set = set()
+    _cancel_lock = threading.Lock()
 
     @classmethod
     def cancel_job_execution(cls, job_id: str):
-        cls._cancelled_jobs.add(job_id)
+        with cls._cancel_lock:
+            cls._cancelled_jobs.add(job_id)
+
+    @classmethod
+    def clear_cancelled_job(cls, job_id: str):
+        with cls._cancel_lock:
+            cls._cancelled_jobs.discard(job_id)
 
     @classmethod
     def is_job_cancelled(cls, job_id: str) -> bool:
-        return job_id in cls._cancelled_jobs
+        with cls._cancel_lock:
+            if job_id in cls._cancelled_jobs:
+                return True
+        try:
+            from ..services.job_queue_service import is_cancel_requested, is_queue_mode
+
+            return is_queue_mode() and is_cancel_requested(job_id)
+        except Exception:
+            return False
 
     def __init__(self, region_name: str = None, role_arn: Optional[str] = None):
         """
@@ -86,31 +138,15 @@ class TransformationJobExecutor:
         context: dict | None = None,
     ) -> None:
         """Write failed job to dead letter queue for later inspection/retry."""
-        try:
-            from .. import resource_naming as rn
+        from ..services.dlq_service import write_failed_job
 
-            cfg = get_config()
-            table_name = os.getenv("DYNAMODB_DLQ_TABLE") or rn.dynamodb_table_name(
-                "dlq", capability=cfg.capability_name, environment=cfg.environment
-            )
-            table = self.dynamodb.Table(table_name)
-            now = datetime.utcnow().isoformat() + "Z"
-            table.put_item(
-                Item={
-                    "PK": "dlq",
-                    "SK": f"{now}#{job_id}",
-                    "EntityType": "JobDLQ",
-                    "job_id": job_id,
-                    "journey_id": journey_id,
-                    "stage_id": stage_id,
-                    "error": str(error)[:2000],
-                    "context": str(context)[:5000] if context else "",
-                    "timestamp": now,
-                    "status": "pending_review",
-                }
-            )
-        except Exception as exc:
-            self.logger.warning("DLQ write failed for job %s: %s", job_id, exc)
+        write_failed_job(
+            job_id=job_id,
+            journey_id=journey_id,
+            stage_id=stage_id,
+            error=error,
+            context=str(context) if context else "",
+        )
 
     def _get_journey_pk(self, journey_id: str) -> str:
         """Helper method to get the correct DynamoDB PK for a journey.
@@ -146,36 +182,38 @@ class TransformationJobExecutor:
             return []
 
     def get_next_journey_execution_number(self, journey_id: str) -> int:
-        """Next execution number for journey-level (multi-stage) jobs."""
+        """Next execution number for journey-level (multi-stage) jobs.
+
+        SK is ``JOB#JRN#{nnn}#{timestamp}``, so the newest item is enough.
+        Do not scan every ``JOB#`` row — that stampedes LocalStack on Run all.
+        """
         try:
             response = self.table.query(
                 KeyConditionExpression='PK = :pk AND begins_with(SK, :sk)',
                 ExpressionAttributeValues={
                     ':pk': self._get_journey_pk(journey_id),
-                    ':sk': 'JOB#',
+                    ':sk': 'JOB#JRN#',
                 },
                 ScanIndexForward=False,
+                Limit=1,
             )
-            max_num = 0
-            for item in response.get('Items', []):
-                data = item.get('Data', {})
-                if data.get('jobType') == 'journey':
-                    max_num = max(max_num, int(data.get('executionNumber', 0)))
-                elif item.get('SK', '').startswith('JOB#JRN#'):
-                    max_num = max(max_num, int(data.get('executionNumber', 0)))
-            return max_num + 1 if max_num else 1
+            items = response.get('Items') or []
+            if not items:
+                return 1
+            data = items[0].get('Data') or {}
+            return int(data.get('executionNumber', 0)) + 1
         except Exception as e:
             self.logger.error(f'Error getting journey execution number: {str(e)}')
             return 1
 
-    def start_journey_job_execution(
+    def prepare_journey_job_execution(
         self,
         journey_id: str,
         stage_ids: Optional[List[str]] = None,
         triggered_by: str = 'system',
         reason: str = 'Journey pipeline execution',
-    ) -> str:
-        """Start a single journey-level job that runs all stages sequentially."""
+    ) -> tuple:
+        """Build a journey job item without writing Dynamo or constructing stages."""
         journey = self.get_journey(journey_id)
         if not journey:
             raise Exception(f'Journey {journey_id} not found')
@@ -188,9 +226,10 @@ class TransformationJobExecutor:
             raise ValueError(f'No stages configured for journey {journey_id}')
 
         stage_ids_ordered = [s['stageId'] for s in stages]
+        available = set(list_available_stages())
         for sid in stage_ids_ordered:
-            if sid not in list_available_stages():
-                raise ValueError(f'Stage {sid} not implemented. Available: {", ".join(list_available_stages())}')
+            if sid not in available:
+                raise ValueError(f'Stage {sid} not implemented. Available: {", ".join(available)}')
 
         timestamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
         execution_number = self.get_next_journey_execution_number(journey_id)
@@ -217,8 +256,7 @@ class TransformationJobExecutor:
             }
 
         first_stage_id = stage_ids_ordered[0]
-        first_stage_info = self.get_stage_info(first_stage_id)
-        first_steps = first_stage_info['steps']
+        first_steps = stage_results[first_stage_id]['stepResults']
 
         job_item = {
             'PK': self._get_journey_pk(journey_id),
@@ -257,8 +295,8 @@ class TransformationJobExecutor:
                     'region': self.region_name,
                 },
                 'currentStepIndex': 0,
-                'currentStepId': first_steps[0]['id'] if first_steps else None,
-                'stepResults': stage_results[first_stage_id]['stepResults'],
+                'currentStepId': next(iter(first_steps), None),
+                'stepResults': first_steps,
                 'jobMetrics': {
                     'totalLogs': 0,
                     'totalErrors': 0,
@@ -269,8 +307,29 @@ class TransformationJobExecutor:
                 },
             },
         }
+        return job_id, job_item
 
+    def persist_job_items(self, items: List[Dict[str, Any]]) -> None:
+        """Write job items in one Dynamo batch so Run all is one round-trip."""
+        if not items:
+            return
+        with self.table.batch_writer() as batch:
+            for item in items:
+                batch.put_item(Item=item)
+
+    def start_journey_job_execution(
+        self,
+        journey_id: str,
+        stage_ids: Optional[List[str]] = None,
+        triggered_by: str = 'system',
+        reason: str = 'Journey pipeline execution',
+    ) -> str:
+        """Start a single journey-level job that runs all stages sequentially."""
+        job_id, job_item = self.prepare_journey_job_execution(
+            journey_id, stage_ids, triggered_by, reason
+        )
         self.table.put_item(Item=job_item)
+        stage_ids_ordered = job_item['Data'].get('stageIds') or []
         self.logger.info(
             f'✅ Started journey job {job_id} for {len(stage_ids_ordered)} stages: {", ".join(stage_ids_ordered)}'
         )
@@ -441,7 +500,7 @@ class TransformationJobExecutor:
 
         except JobCancelledException:
             self.logger.info(f'🛑 Journey job {job_id} was cancelled')
-            self._cancelled_jobs.discard(job_id)
+            self.clear_cancelled_job(job_id)
             from ..stages import BaseStage
             BaseStage._last_db_cancel_check.pop(job_id, None)
         except Exception as e:
@@ -466,7 +525,7 @@ class TransformationJobExecutor:
             BaseStage._last_db_cancel_check.pop(job_id, None)
         except JobCancelledException:
             self.logger.info(f'🛑 Job {job_id} was cancelled')
-            self._cancelled_jobs.discard(job_id)
+            self.clear_cancelled_job(job_id)
             from ..stages import BaseStage
             BaseStage._last_db_cancel_check.pop(job_id, None)
         except Exception as e:
@@ -629,37 +688,29 @@ class TransformationJobExecutor:
         return list_available_stages()
 
     def get_stage_info(self, stage_id: str) -> Dict:
-        """Get information about a stage implementation"""
+        """Stage metadata from class attrs. Instantiate only if the class has none."""
         stage_class = get_stage_class(stage_id)
         if not stage_class:
             return None
-        
-        # Create a temporary instance to get stage info (disable logging for temp instance)
-        # Check if the stage class supports the enable_logging parameter
-        import inspect
+        peeked = _peek_stage_class(stage_class, stage_id)
+        if peeked:
+            return peeked
+
         sig = inspect.signature(stage_class.__init__)
         if 'enable_logging' in sig.parameters:
-            temp_stage = stage_class('temp', stage_id, 'temp', self.region_name, self.role_arn, enable_logging=False)
+            temp_stage = stage_class(
+                'temp', stage_id, 'temp', self.region_name, self.role_arn, enable_logging=False
+            )
         else:
             temp_stage = stage_class('temp', stage_id, 'temp', self.region_name, self.role_arn)
-        
-        # Determine stage order based on common pipeline sequence
-        stage_order_map = {
-            'raw_analysis': 0,
-            'stripped_schema': 1, 
-            'data_mapping': 2,
-            'compliance_validation': 3,
-            'business_rules': 4,
-            'integration_testing': 5
-        }
-        
+
         return {
             'stage_id': stage_id,
             'stage_name': temp_stage.stage_name,
             'stage_description': temp_stage.stage_description,
             'steps': temp_stage.steps,
-            'order': stage_order_map.get(stage_id, 99),  # Default to 99 for unknown stages
-            'class_name': stage_class.__name__
+            'order': _STAGE_ORDER_MAP.get(stage_id, 99),
+            'class_name': stage_class.__name__,
         }
 
     def get_journey(self, journey_id: str) -> Dict:

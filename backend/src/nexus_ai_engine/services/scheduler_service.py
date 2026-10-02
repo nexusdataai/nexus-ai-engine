@@ -6,6 +6,7 @@ Schedule configs are persisted in DynamoDB and survive pod restarts.
 """
 
 import asyncio
+import os
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
@@ -31,6 +32,29 @@ class SchedulerService:
         self._running = False
         self._journey_service = None
         self._job_executor = None
+        self._check_interval_sec = self._read_check_interval()
+
+    @staticmethod
+    def _read_check_interval() -> int:
+        try:
+            value = int(os.getenv("SCHEDULER_CHECK_INTERVAL_SEC", "30"))
+        except (TypeError, ValueError):
+            value = 30
+        return max(5, min(3600, value))
+
+    def get_status(self) -> dict:
+        enabled_count = sum(1 for s in self._schedules.values() if s.get("enabled"))
+        return {
+            "running": self._running,
+            "schedule_count": len(self._schedules),
+            "enabled_count": enabled_count,
+            "check_interval_sec": self._check_interval_sec,
+        }
+
+    def set_check_interval(self, seconds: int) -> int:
+        self._check_interval_sec = max(5, min(3600, int(seconds)))
+        os.environ["SCHEDULER_CHECK_INTERVAL_SEC"] = str(self._check_interval_sec)
+        return self._check_interval_sec
 
     @classmethod
     def get_instance(cls) -> 'SchedulerService':
@@ -78,25 +102,58 @@ class SchedulerService:
     # DynamoDB CRUD
     # =========================================================================
 
+    def _ingest_schedule_items(self, items: List[dict]) -> None:
+        for item in items:
+            data = item.get("Data", {})
+            schedule_id = data.get("scheduleId")
+            if schedule_id:
+                self._schedules[schedule_id] = self._deserialize(data)
+
+    def _scan_schedules(self) -> List[dict]:
+        from boto3.dynamodb.conditions import Attr
+
+        items: List[dict] = []
+        scan_kwargs: dict = {
+            "FilterExpression": Attr("EntityType").eq("BatchSchedule"),
+        }
+        while True:
+            response = self._table.scan(**scan_kwargs)
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
+        return items
+
+    def _query_schedules_gsi1(self) -> List[dict]:
+        items: List[dict] = []
+        query_kwargs: dict = {
+            "IndexName": "GSI1",
+            "KeyConditionExpression": "GSI1PK = :pk",
+            "ExpressionAttributeValues": {":pk": "SCHEDULES"},
+        }
+        while True:
+            response = self._table.query(**query_kwargs)
+            items.extend(response.get("Items", []))
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            query_kwargs["ExclusiveStartKey"] = last_key
+        return items
+
     def _load_schedules_from_db(self):
         try:
-            from boto3.dynamodb.conditions import Attr
+            from ..adapters.dynamodb.gsi_compat import is_gsi_key_mismatch
 
             self._schedules = {}
-            scan_kwargs: dict = {
-                "FilterExpression": Attr("EntityType").eq("BatchSchedule"),
-            }
-            while True:
-                response = self._table.scan(**scan_kwargs)
-                for item in response.get("Items", []):
-                    data = item.get("Data", {})
-                    schedule_id = data.get("scheduleId")
-                    if schedule_id:
-                        self._schedules[schedule_id] = self._deserialize(data)
-                last_key = response.get("LastEvaluatedKey")
-                if not last_key:
-                    break
-                scan_kwargs["ExclusiveStartKey"] = last_key
+            try:
+                items = self._query_schedules_gsi1()
+            except Exception as exc:
+                if not is_gsi_key_mismatch(exc):
+                    raise
+                logger.warning(f"GSI1 schedule query unavailable, falling back to scan: {exc}")
+                items = self._scan_schedules()
+            self._ingest_schedule_items(items)
         except Exception as e:
             logger.error(f"Failed to load schedules: {e}")
 
@@ -148,11 +205,19 @@ class SchedulerService:
     # Public API
     # =========================================================================
 
+    @staticmethod
+    def normalize_stage_id(stage_id: Optional[str]) -> str:
+        """Empty / 'journey' means a journey-level run (JOB#JRN#)."""
+        value = (stage_id or "").strip()
+        if not value or value.lower() == "journey":
+            return ""
+        return value
+
     def create_schedule(
         self,
         journey_id: str,
-        stage_id: str,
-        interval_minutes: int,
+        stage_id: Optional[str] = None,
+        interval_minutes: int = 5,
         enabled: bool = True,
         timezone_str: str = 'UTC',
         created_by: str = 'ui',
@@ -161,6 +226,7 @@ class SchedulerService:
         now = datetime.now(timezone.utc).isoformat()
         next_run = (datetime.now(timezone.utc) + timedelta(minutes=interval_minutes)).isoformat()
 
+        stage_id = self.normalize_stage_id(stage_id)
         schedule = {
             'scheduleId': schedule_id,
             'journeyId': journey_id,
@@ -287,17 +353,17 @@ class SchedulerService:
             return None
 
         journey_id = schedule['journeyId']
-        stage_id = schedule['stageId']
+        stage_id = self.normalize_stage_id(schedule.get('stageId'))
         interval = schedule.get('intervalMinutes', 5)
 
-        logger.info(f"Run-now triggered: schedule={schedule_id} journey={journey_id} stage={stage_id}")
+        logger.info(f"Run-now triggered: schedule={schedule_id} journey={journey_id} stage={stage_id or 'journey'}")
 
         from ..models.journey_model import JourneyActionRequest
         svc = self._get_journey_service()
         request = JourneyActionRequest(
             action='run_job',
             journey_id=journey_id,
-            stage_id=stage_id,
+            stage_id=stage_id or None,
             triggered_by='scheduler',
             reason='Manual run-now',
         )
@@ -344,10 +410,10 @@ class SchedulerService:
     # =========================================================================
 
     async def _scheduler_loop(self):
-        logger.info("Scheduler loop started (30s check interval)")
+        logger.info(f"Scheduler loop started ({self._check_interval_sec}s check interval)")
         while self._running:
             try:
-                await asyncio.sleep(30)
+                await asyncio.sleep(self._check_interval_sec)
                 await self._check_and_trigger()
             except asyncio.CancelledError:
                 break
@@ -455,20 +521,23 @@ class SchedulerService:
     async def _trigger_job(self, schedule: dict):
         schedule_id = schedule['scheduleId']
         journey_id = schedule['journeyId']
-        stage_id = schedule['stageId']
+        stage_id = self.normalize_stage_id(schedule.get('stageId'))
         interval = schedule['intervalMinutes']
 
         if not self._claim_schedule(schedule):
             return
 
-        logger.info(f"Scheduler triggering job: schedule={schedule_id} journey={journey_id} stage={stage_id}")
+        logger.info(
+            f"Scheduler triggering job: schedule={schedule_id} journey={journey_id} "
+            f"stage={stage_id or 'journey'}"
+        )
         try:
             from ..models.journey_model import JourneyActionRequest
             svc = self._get_journey_service()
             request = JourneyActionRequest(
                 action='run_job',
                 journey_id=journey_id,
-                stage_id=stage_id,
+                stage_id=stage_id or None,
                 triggered_by='scheduler',
                 reason=f'Scheduled execution (every {interval}m)',
             )

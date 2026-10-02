@@ -12,12 +12,21 @@ import type {
   FleetWorker,
   QueueJobsResponse,
   QueueSummary,
+  ArchivedJobRow,
+  EngineSettings,
   ScheduleRow,
   ToolDescriptor,
   ValidationResult,
   WorkerRow,
   WorkersSummary,
 } from "@/types/api";
+import type { AppTrendsResponse, AppTrendsTab, AppTrendsWindow } from "@/types/appTrends";
+import type { AthenaOverview, DataStoreWindow, DynamoOverview } from "@/types/dataStores";
+import type { InfraCategory, InfrastructureDiagnosticsResult } from "@/types/diagnostics";
+import type { CrashAnalyzerResponse, DlqEntry, DlqListResponse, StaleJob, StaleJobsResponse } from "@/types/runbooks";
+import type { RedisCacheOverview, RedisFlushResponse } from "@/types/redisCache";
+import type { ResourceSummaryResponse, ResourceWindow } from "@/types/resourceMonitoring";
+import type { SlaPillarDetail, SlaPillarId, SlaSummaryResponse, SlaTimelineResponse } from "@/types/monitoring";
 import type { RegisteredStage, StageJob, StageJourneyDetail, UnifiedRunRow } from "@/types/stageJourney";
 import { authStore } from "@/services/authStore";
 
@@ -61,7 +70,7 @@ export async function apiFetch<T>(path: string, opts: FetchOpts = {}): Promise<T
 }
 
 export const api = {
-  version: () => apiFetch<{ version: string }>("/version"),
+  version: () => apiFetch<{ name?: string; version: string; env?: string; git_sha?: string }>("/version"),
 
   listExecutions: (query?: Record<string, string>) =>
     apiFetch<ExecutionSummary[]>("/api/v1/executions/", { query }),
@@ -121,6 +130,18 @@ export const api = {
     });
     return normalizeStageJob(raw, { journeyId });
   },
+
+  runJourneyJobsBulk: (journeyIds: string[]) =>
+    apiFetch<{
+      success: boolean;
+      message: string;
+      queued: number;
+      failed: number;
+      jobs: Array<{ journey_id: string; job_id?: string; ok?: boolean; error?: string }>;
+    }>("/api/v1/journeys/bulk-run", {
+      method: "POST",
+      body: { journey_ids: journeyIds, triggered_by: "ui" },
+    }),
 
   runStageJob: async (journeyId: string, stageId: string) => {
     const qs = new URLSearchParams({ stage_id: stageId, triggered_by: "ui" });
@@ -276,6 +297,64 @@ export const api = {
       query: journeyId ? { journey_id: journeyId } : undefined,
     }),
 
+  createSchedule: (body: {
+    journey_id: string;
+    stage_id?: string;
+    interval_minutes: number;
+    enabled?: boolean;
+    timezone?: string;
+  }) =>
+    apiFetch<{ success: boolean; data: ScheduleRow }>("/api/v1/schedules/", {
+      method: "POST",
+      body,
+    }),
+
+  updateSchedule: (
+    scheduleId: string,
+    body: { interval_minutes?: number; enabled?: boolean; timezone?: string },
+  ) =>
+    apiFetch<{ success: boolean; data: ScheduleRow }>(`/api/v1/schedules/${scheduleId}`, {
+      method: "PUT",
+      body,
+    }),
+
+  toggleSchedule: (scheduleId: string) =>
+    apiFetch<{ success: boolean; data: ScheduleRow }>(`/api/v1/schedules/${scheduleId}/toggle`, {
+      method: "POST",
+    }),
+
+  deleteSchedule: (scheduleId: string) =>
+    apiFetch<{ success: boolean; message?: string }>(`/api/v1/schedules/${scheduleId}`, {
+      method: "DELETE",
+    }),
+
+  runScheduleNow: (scheduleId: string) =>
+    apiFetch<{ success: boolean; data: ScheduleRow }>(`/api/v1/schedules/${scheduleId}/run-now`, {
+      method: "POST",
+    }),
+
+  searchArchivedJobs: (query?: string, dateFrom?: string, dateTo?: string, limit = 50) =>
+    apiFetch<{ success: boolean; jobs: ArchivedJobRow[]; total: number; source?: string }>(
+      "/api/v1/journeys/archived-jobs",
+      {
+        query: {
+          query: query || undefined,
+          date_from: dateFrom || undefined,
+          date_to: dateTo || undefined,
+          limit,
+        },
+      },
+    ),
+
+  getArchivedJobLogs: (jobId: string) =>
+    apiFetch<{
+      success: boolean;
+      job_id: string;
+      journey_id?: string;
+      steps: Record<string, unknown>;
+      message?: string;
+    }>(`/api/v1/journeys/archived-jobs/${encodeURIComponent(jobId)}/logs`),
+
   fleetSummary: () => apiFetch<FleetSummary>("/api/v1/fleet/summary"),
 
   fleetMetrics: (window = "24h") =>
@@ -293,13 +372,127 @@ export const api = {
   listQueueWorkers: () => apiFetch<{ workers: WorkerRow[]; generated_at: string }>("/api/v1/workers"),
 
   scaleWorkers: (replicas: number) =>
-    apiFetch<{ replicas: number; capability: string; deployment?: { desired: number; ready: number; available: number; name: string } }>(
+    apiFetch<{
+      replicas: number;
+      capability: string;
+      keda_synced?: boolean;
+      deployment?: { desired: number; ready: number; available: number; name: string };
+    }>(
       "/api/v1/workers/scale",
       {
         method: "PATCH",
         body: { replicas },
       },
     ),
+
+  getSettings: () => apiFetch<EngineSettings>("/api/v1/settings"),
+
+  updateSettings: (body: {
+    replicas?: number;
+    worker_threads?: number;
+    max_global_jobs?: number;
+    scheduler_interval_sec?: number;
+    autoscaling?: {
+      enabled: boolean;
+      min_replicas: number;
+      max_replicas: number;
+      lag_threshold: number;
+    };
+  }) =>
+    apiFetch<EngineSettings>("/api/v1/settings", {
+      method: "PATCH",
+      body,
+    }),
+
+  getSlaSummary: (window: "1h" | "24h" = "1h") =>
+    apiFetch<SlaSummaryResponse>("/api/v1/monitoring/slas", { query: { window } }),
+
+  getSlaTimeline: (hours = 24) =>
+    apiFetch<SlaTimelineResponse>("/api/v1/monitoring/slas/timeline", { query: { hours } }),
+
+  getSlaPillar: (pillar: SlaPillarId, window: "1h" | "24h" = "1h") =>
+    apiFetch<SlaPillarDetail>(`/api/v1/monitoring/slas/${pillar}`, { query: { window } }),
+
+  getAppTrends: (tab: AppTrendsTab, window: AppTrendsWindow = "24h") =>
+    apiFetch<AppTrendsResponse>(`/api/v1/monitoring/app/${tab}`, { query: { window } }),
+
+  getResourceUsage: (window: ResourceWindow = "1h") =>
+    apiFetch<ResourceSummaryResponse>("/api/v1/monitoring/resources", { query: { window } }),
+
+  getRedisOverview: () => apiFetch<RedisCacheOverview>("/api/v1/monitoring/redis"),
+
+  collectRedisSnapshots: () =>
+    apiFetch<RedisFlushResponse>("/api/v1/monitoring/redis/snapshots/collect", { method: "POST" }),
+
+  flushRedisSnapshots: () =>
+    apiFetch<RedisFlushResponse>("/api/v1/monitoring/redis/snapshots/flush", {
+      method: "POST",
+      query: { confirm: "FLUSH_SNAPSHOTS" },
+    }),
+
+  flushRedisSseHistory: () =>
+    apiFetch<RedisFlushResponse>("/api/v1/monitoring/redis/sse/flush", {
+      method: "POST",
+      query: { confirm: "FLUSH_SSE_HISTORY" },
+    }),
+
+  getDynamoOverview: (window: DataStoreWindow = "1h") =>
+    apiFetch<DynamoOverview>("/api/v1/monitoring/dynamodb", { query: { window } }),
+
+  getAthenaOverview: (window: DataStoreWindow = "1h") =>
+    apiFetch<AthenaOverview>("/api/v1/monitoring/athena", { query: { window } }),
+
+  runInfraDiagnostics: () =>
+    apiFetch<InfrastructureDiagnosticsResult>("/api/v1/diagnostics/infrastructure"),
+
+  runInfraCategory: (category: InfraCategory) =>
+    apiFetch<InfrastructureDiagnosticsResult>(`/api/v1/diagnostics/infrastructure/${category}`),
+
+  listStaleJobs: (thresholdMin?: number) =>
+    apiFetch<StaleJobsResponse>("/api/v1/runbooks/stale-jobs", {
+      query: { threshold_min: thresholdMin },
+    }),
+
+  cancelAllStaleJobs: (skipUnverifiedLong = true) =>
+    apiFetch<Record<string, unknown>>("/api/v1/runbooks/stale-jobs/cancel-all", {
+      method: "POST",
+      body: { skip_unverified_long: skipUnverifiedLong },
+    }),
+
+  cancelOneStaleJob: (job: StaleJob) =>
+    apiFetch<{ job_id: string; cancelled: boolean }>("/api/v1/runbooks/stale-jobs/cancel-one", {
+      method: "POST",
+      body: job,
+    }),
+
+  listCrashes: (component?: string) =>
+    apiFetch<CrashAnalyzerResponse>("/api/v1/runbooks/crashes", {
+      query: { component: component || undefined },
+    }),
+
+  listDlq: (status?: string) =>
+    apiFetch<DlqListResponse>("/api/v1/dlq", { query: { status: status || undefined } }),
+
+  importFailedJobsToDlq: () =>
+    apiFetch<DlqListResponse>("/api/v1/dlq/import-failed", { method: "POST" }),
+
+  reprocessDlq: (sk: string) =>
+    apiFetch<{ reprocessed: boolean; new_job_id?: string; original?: DlqEntry }>("/api/v1/dlq/reprocess", {
+      method: "POST",
+      body: { sk },
+    }),
+
+  reprocessDlqBulk: (sks: string[]) =>
+    apiFetch<{ requested: number; reprocessed: number }>("/api/v1/dlq/reprocess-bulk", {
+      method: "POST",
+      body: { sks },
+    }),
+
+  dismissDlq: (sk: string) =>
+    apiFetch<{ dismissed: boolean; item?: DlqEntry }>("/api/v1/dlq/dismiss", {
+      method: "POST",
+      body: { sk },
+    }),
 
   configureWorkerAutoscaling: (body: {
     enabled: boolean;

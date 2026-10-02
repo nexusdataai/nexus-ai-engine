@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Activity, AlertTriangle, Clock, PlayCircle, Server, Users } from "lucide-react";
@@ -6,8 +7,30 @@ import { EmptyState } from "@/components/EmptyState";
 import { StatusBadge } from "@/components/StatusBadge";
 import { WorkerHealthCardLink, WorkerHealthList } from "@/components/workers/WorkerHealthList";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useWorkersSnapshot } from "@/hooks/useQueueSnapshot";
 import { api } from "@/services/api";
 import { truncateId } from "@/lib/utils";
+import type { UnifiedRunRow } from "@/types/stageJourney";
+
+function throughputFromRuns(runs: UnifiedRunRow[], hours = 24) {
+  const cutoff = Date.now() - hours * 60 * 60 * 1000;
+  let submitted = 0;
+  let succeeded = 0;
+  let failed = 0;
+  for (const run of runs) {
+    if (run.kind === "stage_job") {
+      const ts = run.startedAt ? Date.parse(run.startedAt) : NaN;
+      if (!Number.isFinite(ts) || ts < cutoff) continue;
+    } else {
+      continue;
+    }
+    submitted += 1;
+    const status = run.status.toLowerCase();
+    if (["completed", "succeeded", "success"].includes(status)) succeeded += 1;
+    else if (["failed", "error"].includes(status)) failed += 1;
+  }
+  return { submitted, succeeded, failed };
+}
 
 export function DashboardPage() {
   const fleet = useQuery({
@@ -20,11 +43,7 @@ export function DashboardPage() {
     queryFn: () => api.fleetMetrics("24h"),
     refetchInterval: 30_000,
   });
-  const workers = useQuery({
-    queryKey: ["fleet", "workers"],
-    queryFn: () => api.fleetWorkers(),
-    refetchInterval: 10_000,
-  });
+  const queueWorkers = useWorkersSnapshot();
   const running = useQuery({
     queryKey: ["executions", "RUNNING"],
     queryFn: () => api.listExecutions({ status: "running" }),
@@ -42,13 +61,22 @@ export function DashboardPage() {
   });
 
   const summary = fleet.data;
-  const throughput = metrics.data?.throughput;
+  const runThroughput = useMemo(
+    () => throughputFromRuns(recentRuns.data ?? []),
+    [recentRuns.data],
+  );
+  const throughput =
+    runThroughput.submitted > 0 || runThroughput.failed > 0 || runThroughput.succeeded > 0
+      ? runThroughput
+      : metrics.data?.throughput;
   const p95 = metrics.data?.tool_dispatch_p95_ms;
   const journeyRows = journeys.data ?? [];
   const journeyJobTotal = journeyRows.reduce((n, j) => n + Number(j.totalJobs ?? 0), 0);
   const recent = (recentRuns.data ?? []).slice(0, 8);
   const stageActive = summary?.stage_jobs_active ?? 0;
   const stageQueued = summary?.stage_jobs_queued ?? 0;
+  const jobWorkerRows = queueWorkers.workers.data?.workers ?? [];
+  const jobWorkerCount = jobWorkerRows.length;
 
   return (
     <div className="space-y-6">
@@ -126,7 +154,15 @@ export function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-bold">{fleet.isLoading ? "…" : (summary?.workers ?? 0)}</p>
+            <p className="text-3xl font-bold" data-testid="job-worker-count">
+              {queueWorkers.workers.isLoading ? "…" : jobWorkerCount}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              job-worker pods
+              {queueWorkers.summary.data?.replicas != null
+                ? ` · ${queueWorkers.summary.data.replicas} desired`
+                : ""}
+            </p>
           </CardContent>
         </Card>
       </div>
@@ -177,8 +213,15 @@ export function DashboardPage() {
           </CardHeader>
           <CardContent>
             <WorkerHealthList
-              workers={workers.data?.workers ?? []}
-              loading={workers.isLoading}
+              workers={jobWorkerRows.map((w) => ({
+                worker_id: w.worker_id,
+                role: "job-worker",
+                status: w.status,
+                last_seen: w.last_seen,
+              }))}
+              loading={queueWorkers.workers.isLoading}
+              emptyTitle="No job workers"
+              emptyDescription="Job-worker pods and Redis consumers appear here."
             />
           </CardContent>
         </Card>

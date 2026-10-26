@@ -7,6 +7,8 @@ import type { QueueJob } from "@/types/api";
 type Props = {
   jobs: QueueJob[];
   maxGlobal: number;
+  /** Redis active counter when job rows lag behind summary */
+  activeFromSummary?: number;
 };
 
 type AnimatedJob = QueueJob & { leaving?: boolean };
@@ -37,7 +39,7 @@ function JobChip({ job, className }: { job: AnimatedJob; className?: string }) {
   );
 }
 
-export function QueueVisualization({ jobs, maxGlobal }: Props) {
+export function QueueVisualization({ jobs, maxGlobal, activeFromSummary }: Props) {
   const [displayJobs, setDisplayJobs] = useState<AnimatedJob[]>(jobs);
   const prevIds = useRef<Set<string>>(new Set());
 
@@ -72,7 +74,23 @@ export function QueueVisualization({ jobs, maxGlobal }: Props) {
     return { waiting: w, running: r };
   }, [displayJobs]);
 
-  const slots = Array.from({ length: maxGlobal }, (_, i) => running[i] ?? null);
+  const activeSlots = Math.max(running.length, activeFromSummary ?? 0, 0);
+  const slots = Array.from({ length: maxGlobal }, (_, i) => {
+    if (i < running.length) return running[i];
+    if (i < activeSlots) {
+      return {
+        stream_id: `active-placeholder-${i}`,
+        job_id: "…",
+        journey_id: "",
+        job_kind: "active",
+        state: "running" as const,
+        consumer_name: "",
+        idle_ms: 0,
+        leaving: false,
+      } satisfies AnimatedJob;
+    }
+    return null;
+  });
 
   return (
     <div className="space-y-4">
@@ -96,7 +114,7 @@ export function QueueVisualization({ jobs, maxGlobal }: Props) {
 
       <div className="rounded-lg border border-border bg-muted/20 p-4">
         <p className="text-xs font-medium text-muted-foreground mb-2">
-          Active slots ({running.length} running / {maxGlobal} max)
+          Active slots ({activeSlots} running / {maxGlobal} max)
         </p>
         <div
           className={cn(
@@ -113,8 +131,10 @@ export function QueueVisualization({ jobs, maxGlobal }: Props) {
                 job ? "border-solid" : "border-border/60 bg-background/40",
               )}
             >
-              {job ? (
+              {job && !job.stream_id.startsWith("active-placeholder-") ? (
                 <JobChip job={job} className="w-full justify-center" />
+              ) : job ? (
+                <span className="text-xs text-blue-300/80 font-mono">running</span>
               ) : (
                 <span className="text-xs text-muted-foreground">empty</span>
               )}

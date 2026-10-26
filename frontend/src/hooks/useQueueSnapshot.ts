@@ -1,17 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { sseBaseUrl } from "@/utils/sseBaseUrl";
 import { api } from "@/services/api";
 import type { QueueJobsResponse, QueueSummary } from "@/types/api";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
 const POLL_MS = 2_000;
 const SSE_STALE_MS = 8_000;
+const JOBS_INVALIDATE_THROTTLE_MS = 2_000;
 
 export function useQueueSnapshot() {
   const queryClient = useQueryClient();
   const [live, setLive] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const lastSseAt = useRef(0);
+  const lastJobsInvalidateAt = useRef(0);
 
   const summary = useQuery({
     queryKey: ["queue", "summary"],
@@ -27,8 +30,25 @@ export function useQueueSnapshot() {
     retry: 1,
   });
 
+  const maybeRefreshJobs = useCallback(() => {
+    const now = Date.now();
+    if (now - lastJobsInvalidateAt.current < JOBS_INVALIDATE_THROTTLE_MS) return;
+    lastJobsInvalidateAt.current = now;
+    void queryClient.invalidateQueries({ queryKey: ["queue", "jobs"] });
+  }, [queryClient]);
+
   useEffect(() => {
-    const es = new EventSource(`${API_BASE}/api/v1/queue/stream`);
+    const base = sseBaseUrl();
+    if (!base) return;
+
+    const es = new EventSource(`${base}/api/v1/queue/stream`);
+    const markLive = () => {
+      lastSseAt.current = Date.now();
+      setLive(true);
+    };
+
+    es.onopen = () => markLive();
+
     const onQueue = (ev: MessageEvent) => {
       try {
         const data = JSON.parse(ev.data) as {
@@ -39,6 +59,7 @@ export function useQueueSnapshot() {
         };
         if (data.summary) {
           queryClient.setQueryData(["queue", "summary"], data.summary);
+          maybeRefreshJobs();
         }
         if (data.jobs) {
           queryClient.setQueryData(["queue", "jobs"], {
@@ -47,8 +68,7 @@ export function useQueueSnapshot() {
             state: data.state ?? "all",
           });
         }
-        lastSseAt.current = Date.now();
-        setLive(true);
+        markLive();
       } catch {
         /* ignore malformed frames */
       }
@@ -66,13 +86,31 @@ export function useQueueSnapshot() {
       es.close();
       setLive(false);
     };
+  }, [queryClient, maybeRefreshJobs]);
+
+  const refresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.fetchQuery({
+          queryKey: ["queue", "summary"],
+          queryFn: () => api.queueSummary(),
+          staleTime: 0,
+        }),
+        queryClient.fetchQuery({
+          queryKey: ["queue", "jobs"],
+          queryFn: () => api.queueJobs("all", 200),
+          staleTime: 0,
+        }),
+      ]);
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [queryClient]);
 
-  const refresh = async () => {
-    await Promise.all([summary.refetch(), jobs.refetch()]);
-  };
+  const busy = isRefreshing || summary.isFetching || jobs.isFetching;
 
-  return { summary, jobs, live, refresh };
+  return { summary, jobs, live, refresh, isRefreshing: busy };
 }
 
 export function useWorkersSnapshot() {

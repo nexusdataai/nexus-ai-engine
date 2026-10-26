@@ -8,7 +8,7 @@ export type StreamEvent = {
   timestamp?: string;
 };
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+import { sseBaseUrl } from "@/utils/sseBaseUrl";
 
 export function useExecutionStream(executionId: string | undefined) {
   const [events, setEvents] = useState<StreamEvent[]>([]);
@@ -24,7 +24,7 @@ export function useExecutionStream(executionId: string | undefined) {
 
     const connect = () => {
       if (cancelled) return;
-      const base = API_BASE || window.location.origin;
+      const base = sseBaseUrl();
       es = new EventSource(`${base}/api/v1/executions/${executionId}/stream`);
       es.onopen = () => {
         retryRef.current = 0;

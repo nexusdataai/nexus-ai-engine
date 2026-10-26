@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -19,6 +19,7 @@ function stepKey(stageId: string, stepId: string): string {
 
 export function StageJobDetailPage() {
   const { journeyId = "", jobId = "" } = useParams();
+  const queryClient = useQueryClient();
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
   const [expandedStages, setExpandedStages] = useState<Record<string, boolean>>({});
   const [historicalLogs, setHistoricalLogs] = useState<Record<string, LogEntry[]>>({});
@@ -53,10 +54,12 @@ export function StageJobDetailPage() {
     return stage ? [stage] : [];
   }, [journey, job, jobId]);
 
-  const stream = useJourneyJobStream(journeyId, stages, jobId, job?.status ?? null, () => {
-    jobQuery.refetch();
-    journeyQuery.refetch();
-  });
+  const onJobStreamComplete = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["stage-job", journeyId, jobId] });
+    void queryClient.invalidateQueries({ queryKey: ["stage-journey", journeyId] });
+  }, [queryClient, journeyId, jobId]);
+
+  const stream = useJourneyJobStream(journeyId, stages, jobId, job?.status ?? null, onJobStreamComplete);
 
   const terminal = ["completed", "failed", "cancelled"].includes(String(job?.status ?? "").toLowerCase());
 

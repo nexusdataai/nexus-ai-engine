@@ -60,7 +60,7 @@ class LiveAiEngineClient:
             )
 
     async def queue_summary(self) -> TimedResponse:
-        return await self._request("GET", "/api/v1/queue/summary", timeout_s=60.0)
+        return await self._request("GET", "/api/v1/queue/summary", timeout_s=45.0)
 
     async def queue_jobs(self, *, limit: int = 200) -> TimedResponse:
         return await self._request(

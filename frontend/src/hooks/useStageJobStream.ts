@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { LogEntry, SseConnectionStatus, StepState, StepStatus } from "@/types/stageJobStream";
 import type { RegisteredStageStep } from "@/types/stageJourney";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+import { sseBaseUrl } from "@/utils/sseBaseUrl";
 
 export const STEP_PENDING: StepStatus = "pending";
 export const STEP_RUNNING: StepStatus = "running";
@@ -50,9 +50,14 @@ export function useStageJobStream(
 
   const esRef = useRef<EventSource | null>(null);
   const reconnectRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoCollapseRef = useRef(true);
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
+  const jobStatusRef = useRef(jobStatus);
+  jobStatusRef.current = jobStatus;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   useEffect(() => {
     setStepStates(initStepStates(steps));
@@ -62,6 +67,10 @@ export function useStageJobStream(
   }, [steps]);
 
   const closeStream = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (esRef.current) {
       try {
         esRef.current.close();
@@ -72,7 +81,7 @@ export function useStageJobStream(
     }
   }, []);
 
-  const onStepStatus = useCallback((evt: Record<string, unknown>) => {
+  const handleStepStatus = useCallback((evt: Record<string, unknown>) => {
     const sid = String(evt.step_id ?? pick(evt, "step_id") ?? "");
     if (!sid) return;
     const status = normalizeStepStatus(pick(evt, "status") ?? evt.status);
@@ -103,7 +112,7 @@ export function useStageJobStream(
     if (status === STEP_FAILED) setExpanded((prev) => ({ ...prev, [sid]: true }));
   }, []);
 
-  const onLog = useCallback((evt: Record<string, unknown>) => {
+  const handleLog = useCallback((evt: Record<string, unknown>) => {
     const sid = String(evt.step_id ?? pick(evt, "step_id") ?? "__unstepped__");
     const entry: LogEntry = {
       timestamp: String(evt.timestamp ?? pick(evt, "timestamp") ?? new Date().toISOString()),
@@ -114,7 +123,7 @@ export function useStageJobStream(
     setStepLogs((prev) => ({ ...prev, [sid]: [...(prev[sid] ?? []), entry] }));
   }, []);
 
-  const onTaskProgress = useCallback((evt: Record<string, unknown>) => {
+  const handleTaskProgress = useCallback((evt: Record<string, unknown>) => {
     const sid = String(evt.step_id ?? pick(evt, "step_id") ?? "");
     if (!sid) return;
     const progress = Number(pick(evt, "progress") ?? pick(evt, "percentage") ?? 0);
@@ -132,69 +141,76 @@ export function useStageJobStream(
     }));
   }, []);
 
+  const handleJobComplete = useCallback(() => {
+    setStepStates((prev) => {
+      const next = { ...prev };
+      for (const s of stepsRef.current) {
+        if (next[s.id]?.status !== STEP_FAILED) {
+          next[s.id] = { ...(next[s.id] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
+        }
+      }
+      return next;
+    });
+    setCurrentStepId(null);
+    closeStream();
+    setSseStatus("idle");
+    onCompleteRef.current?.();
+  }, [closeStream]);
+
   const connectStream = useCallback(
     (jid: string) => {
       closeStream();
       setSseStatus("connecting");
-      const base = API_BASE || window.location.origin;
+      const base = sseBaseUrl();
       const es = new EventSource(`${base}/api/v1/journeys/${journeyId}/jobs/${jid}/stream`);
       esRef.current = es;
 
-      es.onopen = () => {
+      const markConnected = () => {
         reconnectRef.current = 0;
         setSseStatus("connected");
       };
 
+      es.onopen = () => markConnected();
+
       const parse = (handler: (data: Record<string, unknown>) => void) => (e: MessageEvent) => {
         try {
+          markConnected();
           handler(JSON.parse(e.data) as Record<string, unknown>);
         } catch {
           /* ignore */
         }
       };
 
-      es.addEventListener("step_status", parse(onStepStatus));
-      es.addEventListener("log", parse(onLog));
-      es.addEventListener("task_progress", parse(onTaskProgress));
-      es.addEventListener("job_complete", parse((evt) => {
-        const status = normalizeStepStatus(pick(evt, "status") ?? evt.status ?? "completed");
-        if (status === STEP_COMPLETED) {
-          setStepStates((prev) => {
-            const next = { ...prev };
-            for (const s of stepsRef.current) {
-              if (next[s.id]?.status !== STEP_FAILED) {
-                next[s.id] = { ...(next[s.id] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
-              }
-            }
-            return next;
-          });
-        }
-        setCurrentStepId(null);
-        closeStream();
-        setSseStatus("idle");
-        onComplete?.();
-      }));
+      es.addEventListener("step_status", parse(handleStepStatus));
+      es.addEventListener("log", parse(handleLog));
+      es.addEventListener("task_progress", parse(handleTaskProgress));
+      es.addEventListener("job_complete", parse(() => handleJobComplete()));
 
       es.onerror = () => {
         setSseStatus("disconnected");
         closeStream();
         reconnectRef.current += 1;
-        const terminal = ["completed", "failed", "cancelled"].includes(String(jobStatus ?? "").toLowerCase());
-        if (!terminal && reconnectRef.current <= 5) {
+        const terminal = ["completed", "failed", "cancelled"].includes(
+          String(jobStatusRef.current ?? "").toLowerCase(),
+        );
+        if (!terminal && reconnectRef.current <= 8) {
           const delay = Math.min(8000, 500 * 2 ** reconnectRef.current);
-          setTimeout(() => connectStream(jid), delay);
+          reconnectTimerRef.current = setTimeout(() => connectStream(jid), delay);
         }
       };
     },
-    [journeyId, closeStream, onStepStatus, onLog, onTaskProgress, jobStatus, onComplete],
+    [journeyId, closeStream, handleStepStatus, handleLog, handleTaskProgress, handleJobComplete],
   );
+
+  const connectStreamRef = useRef(connectStream);
+  connectStreamRef.current = connectStream;
 
   useEffect(() => {
     if (!jobId) return;
     const terminal = ["completed", "failed", "cancelled"].includes(String(jobStatus ?? "").toLowerCase());
-    if (!terminal) connectStream(jobId);
+    if (!terminal) connectStreamRef.current(jobId);
     return () => closeStream();
-  }, [jobId, jobStatus, connectStream, closeStream]);
+  }, [jobId, jobStatus, closeStream]);
 
   const resetForNewJob = useCallback(() => {
     autoCollapseRef.current = true;

@@ -169,8 +169,10 @@ class BulkRunSoakRunner:
         stats: SoakCycleStats,
         *,
         drain_start: float,
+        absolute_deadline: float,
     ) -> None:
-        deadline = time.monotonic() + self.drain_timeout_s
+        per_cycle_deadline = drain_start + self.drain_timeout_s
+        deadline = min(per_cycle_deadline, absolute_deadline)
         while time.monotonic() < deadline:
             summary = await self._client.queue_summary()
             self._record_http_issue(issues, cycle, "queue/summary", summary)
@@ -196,10 +198,11 @@ class BulkRunSoakRunner:
             await asyncio.sleep(self.poll_interval_s)
 
         stats.drained = False
+        waited = time.monotonic() - drain_start
         issues.append(
             SoakIssue(
                 "drain_timeout",
-                f"queue not idle within {self.drain_timeout_s}s "
+                f"queue not idle after {waited:.0f}s "
                 f"(peak lag={stats.peak_lag} active={stats.peak_active} queued={stats.peak_queued})",
                 cycle=cycle,
             )
@@ -239,7 +242,12 @@ class BulkRunSoakRunner:
             self._write_report(report)
             return report
 
+        min_cycle_budget_s = 120.0
         while time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if remaining < min_cycle_budget_s:
+                break
+
             cycle += 1
             stats = SoakCycleStats(cycle=cycle, bulk_elapsed_s=0.0, queued=0, failed=0, drain_elapsed_s=None, drained=False)
 
@@ -270,12 +278,15 @@ class BulkRunSoakRunner:
                 issues.append(SoakIssue("bulk_run", "unexpected non-JSON bulk-run response", cycle=cycle))
 
             drain_start = time.monotonic()
-            await self._wait_for_drain(issues, cycle, stats, drain_start=drain_start)
+            await self._wait_for_drain(
+                issues,
+                cycle,
+                stats,
+                drain_start=drain_start,
+                absolute_deadline=deadline,
+            )
 
             cycles.append(stats)
-
-            if time.monotonic() >= deadline:
-                break
 
         ended = time.monotonic()
         report = SoakReport(

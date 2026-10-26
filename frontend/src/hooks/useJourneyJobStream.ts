@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LogEntry, SseConnectionStatus, StepState, StepStatus } from "@/types/stageJobStream";
 import type { StageJourneyStage } from "@/types/stageJourney";
 
-const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+import { sseBaseUrl } from "@/utils/sseBaseUrl";
 
 export const STEP_PENDING: StepStatus = "pending";
 export const STEP_RUNNING: StepStatus = "running";
@@ -59,8 +59,16 @@ export function useJourneyJobStream(
 
   const esRef = useRef<EventSource | null>(null);
   const reconnectRef = useRef(0);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stagesRef = useRef(stages);
   stagesRef.current = stages;
+  const currentStageIdRef = useRef<string | null>(null);
+  currentStageIdRef.current = currentStageId;
+  const jobStatusRef = useRef(jobStatus);
+  jobStatusRef.current = jobStatus;
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
   const stageSignature = useMemo(
     () => stages.map((s) => `${s.id}:${s.steps.map((step) => step.id).join(",")}`).join("|"),
     [stages],
@@ -75,6 +83,10 @@ export function useJourneyJobStream(
   }, [stageSignature]);
 
   const closeStream = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
     if (esRef.current) {
       try {
         esRef.current.close();
@@ -85,15 +97,20 @@ export function useJourneyJobStream(
     }
   }, []);
 
-  const stageSteps = useCallback(
-    (stageId: string) => stagesRef.current.find((s) => s.id === stageId)?.steps ?? [],
-    [],
-  );
+  const resolveStageId = useCallback((stepId: string, explicit: string): string => {
+    if (explicit) return explicit;
+    if (currentStageIdRef.current) return currentStageIdRef.current;
+    for (const stage of stagesRef.current) {
+      if (stage.steps.some((s) => s.id === stepId)) return stage.id;
+    }
+    return stagesRef.current[0]?.id ?? "";
+  }, []);
 
-  const onStepStatus = useCallback((evt: Record<string, unknown>) => {
+  const handleStepStatus = useCallback((evt: Record<string, unknown>) => {
     const sid = String(evt.step_id ?? pick(evt, "step_id") ?? "");
-    const stageId = String(evt.stage_id ?? pick(evt, "stage_id") ?? currentStageId ?? "");
-    if (!sid || !stageId) return;
+    if (!sid) return;
+    const stageId = resolveStageId(sid, String(evt.stage_id ?? pick(evt, "stage_id") ?? ""));
+    if (!stageId) return;
     const key = stepKey(stageId, sid);
     const status = normalizeStepStatus(pick(evt, "status") ?? evt.status);
     const progress = Number(pick(evt, "progress") ?? 0);
@@ -101,7 +118,7 @@ export function useJourneyJobStream(
     setStepStates((prev) => {
       const next = { ...prev, [key]: { ...(prev[key] ?? { progress: 0 }), status, progress: progress || prev[key]?.progress || 0 } };
       if (status === STEP_RUNNING) {
-        const steps = stageSteps(stageId);
+        const steps = stagesRef.current.find((s) => s.id === stageId)?.steps ?? [];
         const idx = steps.findIndex((s) => s.id === sid);
         steps.forEach((s, i) => {
           if (i < idx) {
@@ -123,11 +140,14 @@ export function useJourneyJobStream(
       setExpanded((prev) => ({ ...prev, [key]: true }));
     }
     if (status === STEP_FAILED) setExpanded((prev) => ({ ...prev, [key]: true }));
-  }, [currentStageId, stageSteps]);
+  }, [resolveStageId]);
 
-  const onLog = useCallback((evt: Record<string, unknown>) => {
+  const handleLog = useCallback((evt: Record<string, unknown>) => {
     const sid = String(evt.step_id ?? pick(evt, "step_id") ?? "__unstepped__");
-    const stageId = String(evt.stage_id ?? pick(evt, "stage_id") ?? currentStageId ?? "");
+    const stageId =
+      sid !== "__unstepped__"
+        ? resolveStageId(sid, String(evt.stage_id ?? pick(evt, "stage_id") ?? ""))
+        : String(evt.stage_id ?? pick(evt, "stage_id") ?? currentStageIdRef.current ?? "");
     const key = stageId && sid !== "__unstepped__" ? stepKey(stageId, sid) : sid;
     const entry: LogEntry = {
       timestamp: String(evt.timestamp ?? pick(evt, "timestamp") ?? new Date().toISOString()),
@@ -136,13 +156,52 @@ export function useJourneyJobStream(
       step_id: sid !== "__unstepped__" ? sid : undefined,
     };
     setStepLogs((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), entry] }));
-  }, [currentStageId]);
+  }, [resolveStageId]);
+
+  const handleTaskProgress = useCallback((evt: Record<string, unknown>) => {
+    const sid = String(evt.step_id ?? pick(evt, "step_id") ?? "");
+    if (!sid) return;
+    const stageId = resolveStageId(sid, String(evt.stage_id ?? pick(evt, "stage_id") ?? ""));
+    if (!stageId) return;
+    const key = stepKey(stageId, sid);
+    const progress = Number(pick(evt, "progress") ?? pick(evt, "percentage") ?? 0);
+    setStepStates((prev) => ({
+      ...prev,
+      [key]: {
+        ...(prev[key] ?? { progress: 0, status: STEP_PENDING }),
+        status: prev[key]?.status === STEP_COMPLETED ? STEP_COMPLETED : STEP_RUNNING,
+        progress: progress || prev[key]?.progress || 0,
+      },
+    }));
+    setCurrentStageId(stageId);
+    setCurrentStepId(sid);
+  }, [resolveStageId]);
+
+  const handleJobComplete = useCallback(() => {
+    setStepStates((prev) => {
+      const next = { ...prev };
+      for (const stage of stagesRef.current) {
+        for (const step of stage.steps) {
+          const pk = stepKey(stage.id, step.id);
+          if (next[pk]?.status !== STEP_FAILED) {
+            next[pk] = { ...(next[pk] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
+          }
+        }
+      }
+      return next;
+    });
+    setCurrentStageId(null);
+    setCurrentStepId(null);
+    closeStream();
+    setSseStatus("idle");
+    onCompleteRef.current?.();
+  }, [closeStream]);
 
   const connectStream = useCallback(
     (jid: string) => {
       closeStream();
       setSseStatus("connecting");
-      const base = API_BASE || window.location.origin;
+      const base = sseBaseUrl();
       const es = new EventSource(`${base}/api/v1/journeys/${journeyId}/jobs/${jid}/stream`);
       esRef.current = es;
 
@@ -162,48 +221,36 @@ export function useJourneyJobStream(
         }
       };
 
-      es.addEventListener("step_status", parse(onStepStatus));
-      es.addEventListener("log", parse(onLog));
-      es.addEventListener("job_complete", parse(() => {
-        setStepStates((prev) => {
-          const next = { ...prev };
-          for (const stage of stagesRef.current) {
-            for (const step of stage.steps) {
-              const pk = stepKey(stage.id, step.id);
-              if (next[pk]?.status !== STEP_FAILED) {
-                next[pk] = { ...(next[pk] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
-              }
-            }
-          }
-          return next;
-        });
-        setCurrentStageId(null);
-        setCurrentStepId(null);
-        closeStream();
-        setSseStatus("idle");
-        onComplete?.();
-      }));
+      es.addEventListener("step_status", parse(handleStepStatus));
+      es.addEventListener("log", parse(handleLog));
+      es.addEventListener("task_progress", parse(handleTaskProgress));
+      es.addEventListener("job_complete", parse(() => handleJobComplete()));
 
       es.onerror = () => {
         setSseStatus("disconnected");
         closeStream();
         reconnectRef.current += 1;
-        const terminal = ["completed", "failed", "cancelled"].includes(String(jobStatus ?? "").toLowerCase());
-        if (!terminal && reconnectRef.current <= 5) {
+        const terminal = ["completed", "failed", "cancelled"].includes(
+          String(jobStatusRef.current ?? "").toLowerCase(),
+        );
+        if (!terminal && reconnectRef.current <= 8) {
           const delay = Math.min(8000, 500 * 2 ** reconnectRef.current);
-          setTimeout(() => connectStream(jid), delay);
+          reconnectTimerRef.current = setTimeout(() => connectStream(jid), delay);
         }
       };
     },
-    [journeyId, closeStream, onStepStatus, onLog, jobStatus, onComplete],
+    [journeyId, closeStream, handleStepStatus, handleLog, handleTaskProgress, handleJobComplete],
   );
+
+  const connectStreamRef = useRef(connectStream);
+  connectStreamRef.current = connectStream;
 
   useEffect(() => {
     if (!jobId || jobStatus == null) return;
     const terminal = ["completed", "failed", "cancelled"].includes(String(jobStatus).toLowerCase());
-    if (!terminal) connectStream(jobId);
+    if (!terminal) connectStreamRef.current(jobId);
     return () => closeStream();
-  }, [jobId, jobStatus, connectStream, closeStream]);
+  }, [jobId, jobStatus, closeStream]);
 
   const resetForNewJob = useCallback(() => {
     setStepLogs({});

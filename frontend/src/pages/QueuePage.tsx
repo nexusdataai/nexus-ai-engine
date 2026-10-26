@@ -18,7 +18,7 @@ function jobHref(job: QueueJob): string {
 }
 
 export function QueuePage() {
-  const { summary, jobs, live, refresh } = useQueueSnapshot();
+  const { summary, jobs, live, refresh, isRefreshing } = useQueueSnapshot();
 
   if (summary.isError || jobs.isError) {
     const message =
@@ -82,10 +82,11 @@ export function QueuePage() {
             type="button"
             variant="outline"
             size="sm"
+            disabled={isRefreshing}
             onClick={() => void refresh()}
             data-testid="queue-refresh"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
             Refresh
           </Button>
         </div>
@@ -144,7 +145,11 @@ export function QueuePage() {
           {jobs.isLoading ? (
             <p className="text-sm text-muted-foreground">Loading queue…</p>
           ) : (
-            <QueueVisualization jobs={rows} maxGlobal={snap?.max_global ?? 10} />
+            <QueueVisualization
+              jobs={rows}
+              maxGlobal={snap?.max_global ?? 10}
+              activeFromSummary={snap?.active}
+            />
           )}
         </CardContent>
       </Card>

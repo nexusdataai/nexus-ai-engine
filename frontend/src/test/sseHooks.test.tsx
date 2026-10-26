@@ -112,6 +112,34 @@ describe("SSE hooks", () => {
     expect(result.current.isRefreshing).toBe(false);
   });
 
+  it("useJourneyJobStream marks substeps completed when job status is terminal", async () => {
+    const stages = [
+      {
+        id: "stg1",
+        name: "S",
+        order: 1,
+        steps: [
+          { id: "step1", name: "A", order: 1 },
+          { id: "step2", name: "B", order: 1 },
+        ],
+      },
+    ];
+    const client = new QueryClient();
+    const { result, rerender } = renderHook(
+      ({ status }: { status: string }) => useJourneyJobStream("JRN-1", stages, "JOB-1", status),
+      { wrapper: wrapper(client), initialProps: { status: "running" } },
+    );
+
+    expect(result.current.getStepStatus("stg1", "step1")).toBe("pending");
+
+    rerender({ status: "completed" });
+
+    await waitFor(() => {
+      expect(result.current.getStepStatus("stg1", "step1")).toBe("completed");
+      expect(result.current.getStepStatus("stg1", "step2")).toBe("completed");
+    });
+  });
+
   it("useJourneyJobStream keeps one EventSource across parent re-renders", async () => {
     const stages = [
       {

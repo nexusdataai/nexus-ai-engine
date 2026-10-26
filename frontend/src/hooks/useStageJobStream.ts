@@ -34,6 +34,32 @@ function initStepStates(steps: RegisteredStageStep[]): Record<string, StepState>
   return out;
 }
 
+function applyTerminalStepStates(
+  steps: RegisteredStageStep[],
+  prev: Record<string, StepState>,
+  jobStatus: string,
+  stepLogs: Record<string, LogEntry[]>,
+): Record<string, StepState> {
+  const s = jobStatus.toLowerCase();
+  if (!["completed", "failed", "cancelled"].includes(s)) return prev;
+
+  const next = { ...prev };
+  for (const step of steps) {
+    const cur = next[step.id]?.status ?? STEP_PENDING;
+    const hasLogs = (stepLogs[step.id]?.length ?? 0) > 0;
+    if (s === "completed") {
+      if (cur !== STEP_FAILED) next[step.id] = { ...(next[step.id] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
+    } else if (s === "failed") {
+      if (cur === STEP_FAILED) continue;
+      if (cur === STEP_RUNNING) next[step.id] = { ...(next[step.id] ?? { progress: 0 }), status: STEP_FAILED, progress: next[step.id]?.progress ?? 0 };
+      else if (cur === STEP_COMPLETED || hasLogs) next[step.id] = { ...(next[step.id] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
+    } else if (cur !== STEP_COMPLETED && cur !== STEP_FAILED) {
+      next[step.id] = { ...(next[step.id] ?? { progress: 0 }), status: "cancelled", progress: next[step.id]?.progress ?? 0 };
+    }
+  }
+  return next;
+}
+
 export function useStageJobStream(
   journeyId: string,
   steps: RegisteredStageStep[],
@@ -58,6 +84,8 @@ export function useStageJobStream(
   jobStatusRef.current = jobStatus;
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  const stepLogsRef = useRef(stepLogs);
+  stepLogsRef.current = stepLogs;
 
   useEffect(() => {
     setStepStates(initStepStates(steps));
@@ -141,21 +169,19 @@ export function useStageJobStream(
     }));
   }, []);
 
+  const finalizeFromJobStatus = useCallback((status: string) => {
+    setStepStates((prev) =>
+      applyTerminalStepStates(stepsRef.current, prev, status, stepLogsRef.current),
+    );
+  }, []);
+
   const handleJobComplete = useCallback(() => {
-    setStepStates((prev) => {
-      const next = { ...prev };
-      for (const s of stepsRef.current) {
-        if (next[s.id]?.status !== STEP_FAILED) {
-          next[s.id] = { ...(next[s.id] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
-        }
-      }
-      return next;
-    });
+    finalizeFromJobStatus("completed");
     setCurrentStepId(null);
     closeStream();
     setSseStatus("idle");
     onCompleteRef.current?.();
-  }, [closeStream]);
+  }, [closeStream, finalizeFromJobStatus]);
 
   const connectStream = useCallback(
     (jid: string) => {
@@ -211,6 +237,12 @@ export function useStageJobStream(
     if (!terminal) connectStreamRef.current(jobId);
     return () => closeStream();
   }, [jobId, jobStatus, closeStream]);
+
+  useEffect(() => {
+    if (!jobStatus) return;
+    const terminal = ["completed", "failed", "cancelled"].includes(String(jobStatus).toLowerCase());
+    if (terminal) finalizeFromJobStatus(jobStatus);
+  }, [jobStatus, steps, finalizeFromJobStatus]);
 
   const resetForNewJob = useCallback(() => {
     autoCollapseRef.current = true;

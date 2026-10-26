@@ -42,6 +42,46 @@ function initStepStates(stages: StageJourneyStage[]): Record<string, StepState> 
   return out;
 }
 
+/** When the job is terminal we may never open SSE (or miss job_complete); sync the tree from job status. */
+function applyTerminalStepStates(
+  stages: StageJourneyStage[],
+  prev: Record<string, StepState>,
+  jobStatus: string,
+  stepLogs: Record<string, LogEntry[]>,
+): Record<string, StepState> {
+  const s = jobStatus.toLowerCase();
+  if (!["completed", "failed", "cancelled"].includes(s)) return prev;
+
+  const next = { ...prev };
+  for (const stage of stages) {
+    for (const step of stage.steps) {
+      const pk = stepKey(stage.id, step.id);
+      const cur = next[pk]?.status ?? STEP_PENDING;
+      const hasLogs = (stepLogs[pk]?.length ?? 0) > 0;
+
+      if (s === "completed") {
+        if (cur !== STEP_FAILED) {
+          next[pk] = { ...(next[pk] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
+        }
+        continue;
+      }
+      if (s === "failed") {
+        if (cur === STEP_FAILED) continue;
+        if (cur === STEP_RUNNING) {
+          next[pk] = { ...(next[pk] ?? { progress: 0 }), status: STEP_FAILED, progress: next[pk]?.progress ?? 0 };
+        } else if (cur === STEP_COMPLETED || hasLogs) {
+          next[pk] = { ...(next[pk] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
+        }
+        continue;
+      }
+      if (cur !== STEP_COMPLETED && cur !== STEP_FAILED) {
+        next[pk] = { ...(next[pk] ?? { progress: 0 }), status: "cancelled", progress: next[pk]?.progress ?? 0 };
+      }
+    }
+  }
+  return next;
+}
+
 export function useJourneyJobStream(
   journeyId: string,
   stages: StageJourneyStage[],
@@ -68,6 +108,8 @@ export function useJourneyJobStream(
   jobStatusRef.current = jobStatus;
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  const stepLogsRef = useRef(stepLogs);
+  stepLogsRef.current = stepLogs;
 
   const stageSignature = useMemo(
     () => stages.map((s) => `${s.id}:${s.steps.map((step) => step.id).join(",")}`).join("|"),
@@ -177,25 +219,20 @@ export function useJourneyJobStream(
     setCurrentStepId(sid);
   }, [resolveStageId]);
 
+  const finalizeFromJobStatus = useCallback((status: string) => {
+    setStepStates((prev) =>
+      applyTerminalStepStates(stagesRef.current, prev, status, stepLogsRef.current),
+    );
+  }, []);
+
   const handleJobComplete = useCallback(() => {
-    setStepStates((prev) => {
-      const next = { ...prev };
-      for (const stage of stagesRef.current) {
-        for (const step of stage.steps) {
-          const pk = stepKey(stage.id, step.id);
-          if (next[pk]?.status !== STEP_FAILED) {
-            next[pk] = { ...(next[pk] ?? { progress: 0 }), status: STEP_COMPLETED, progress: 100 };
-          }
-        }
-      }
-      return next;
-    });
+    finalizeFromJobStatus("completed");
     setCurrentStageId(null);
     setCurrentStepId(null);
     closeStream();
     setSseStatus("idle");
     onCompleteRef.current?.();
-  }, [closeStream]);
+  }, [closeStream, finalizeFromJobStatus]);
 
   const connectStream = useCallback(
     (jid: string) => {
@@ -251,6 +288,12 @@ export function useJourneyJobStream(
     if (!terminal) connectStreamRef.current(jobId);
     return () => closeStream();
   }, [jobId, jobStatus, closeStream]);
+
+  useEffect(() => {
+    if (!jobStatus) return;
+    const terminal = ["completed", "failed", "cancelled"].includes(String(jobStatus).toLowerCase());
+    if (terminal) finalizeFromJobStatus(jobStatus);
+  }, [jobStatus, stageSignature, finalizeFromJobStatus]);
 
   const resetForNewJob = useCallback(() => {
     setStepLogs({});

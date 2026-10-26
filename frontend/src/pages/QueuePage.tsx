@@ -100,7 +100,7 @@ export function QueuePage() {
             <p className="text-3xl font-bold">
               {jobs.isLoading
                 ? "…"
-                : rows.filter((j) => j.state === "waiting").length}
+                : rows.filter((j) => j.state === "waiting" || j.state === "claimed").length}
             </p>
           </CardContent>
         </Card>

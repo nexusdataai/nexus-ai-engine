@@ -26,7 +26,9 @@ from nexus_ai_engine.services.job_queue_service import (
     ack_job,
     claim_job,
     ensure_consumer_group,
+    return_job_to_waiting_lane,
     get_active_job_count,
+    get_max_global_jobs,
     get_pending_count,
     get_queue_depth,
     get_worker_threads,
@@ -168,6 +170,7 @@ def _process_job(job: QueuedJob, executor: TransformationJobExecutor) -> None:
         if "capacity" in str(exc).lower():
             logger.warning("Job {} deferred: {}", job.job_id, exc)
             should_ack = False
+            return_job_to_waiting_lane(job.stream_id)
             time.sleep(2)
             return
         executor.fail_job(job.journey_id, job.job_id, str(exc))
@@ -215,6 +218,10 @@ def worker_loop() -> None:
                     if free <= 0:
                         break
                 if free <= 0 or _shutdown.is_set():
+                    continue
+
+                if get_active_job_count() >= get_max_global_jobs():
+                    wait(in_flight, timeout=1.0, return_when=FIRST_COMPLETED)
                     continue
 
                 job = claim_job(_consumer_name, block_ms=2000)

@@ -80,13 +80,23 @@ def is_queue_mode() -> bool:
 
 
 def redis_available() -> bool:
-    return REDIS_AVAILABLE and bool(os.getenv("REDIS_URL", REDIS_URL))
+    if not REDIS_AVAILABLE or not os.getenv("REDIS_URL", REDIS_URL):
+        return False
+    try:
+        return bool(_client().ping())
+    except Exception:
+        return False
 
 
 def _client():
     if not REDIS_AVAILABLE:
         raise RuntimeError("redis package not available")
-    return redis_sync.from_url(REDIS_URL, decode_responses=True)
+    return redis_sync.from_url(
+        REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=float(os.getenv("REDIS_CONNECT_TIMEOUT", "2")),
+        socket_timeout=float(os.getenv("REDIS_SOCKET_TIMEOUT", "5")),
+    )
 
 
 def ensure_consumer_group() -> None:
@@ -156,11 +166,56 @@ def _unmark_waiting(stream_id: str) -> None:
         logger.warning("Failed to clear waiting job %s: %s", stream_id, exc)
 
 
+def return_job_to_waiting_lane(stream_id: str) -> None:
+    """Job stays in the consumer PEL but should appear in the waiting lane UI."""
+    _mark_waiting(stream_id)
+
+
 def get_waiting_count() -> int:
     try:
         return int(_client().scard(JOB_WAITING_SET_KEY) or 0)
     except Exception:
         return get_consumer_lag()
+
+
+def prune_stale_waiting_jobs() -> int:
+    """Remove waiting-set entries that were already delivered or no longer exist."""
+    pruned = 0
+    try:
+        client = _client()
+        last_delivered = str(_group_info().get("last-delivered-id") or "0-0")
+        waiting_ids = client.smembers(JOB_WAITING_SET_KEY) or []
+        for stream_id in waiting_ids:
+            sid = str(stream_id)
+            if not _stream_entry_fields(sid):
+                _unmark_waiting(sid)
+                pruned += 1
+                continue
+            if sid <= last_delivered:
+                _unmark_waiting(sid)
+                pruned += 1
+    except Exception as exc:
+        logger.warning("Failed to prune stale waiting jobs: %s", exc)
+    return pruned
+
+
+def purge_job_queue() -> Dict[str, Any]:
+    """Reset Redis queue state (local ops / recovery). Does not cancel in-flight worker threads."""
+    client = _client()
+    try:
+        client.delete(JOB_WAITING_SET_KEY)
+        client.delete(JOB_ACTIVE_COUNTER_KEY)
+        client.delete(JOB_CANCELLED_SET_KEY)
+        try:
+            client.xgroup_destroy(JOB_STREAM_KEY, JOB_CONSUMER_GROUP)
+        except Exception:
+            pass
+        client.delete(JOB_STREAM_KEY)
+        ensure_consumer_group()
+        return {"purged": True, "stream": JOB_STREAM_KEY}
+    except Exception as exc:
+        logger.error("purge_job_queue failed: %s", exc)
+        raise
 
 
 def get_consumer_lag() -> int:
@@ -243,7 +298,7 @@ def _job_to_dict(
 def get_queue_snapshot() -> Dict[str, Any]:
     from datetime import datetime, timezone
 
-    lag = get_waiting_count()
+    lag = get_consumer_lag()
     pending = get_pending_count()
     active = get_active_job_count()
     return {
@@ -262,13 +317,14 @@ def get_queue_snapshot() -> Dict[str, Any]:
 def list_pending_jobs(limit: int = 50) -> List[Dict[str, Any]]:
     client = _client()
     active = get_active_job_count()
+    fetch = max(1, min(max(limit, 50), 150))
     try:
         pending_entries = client.xpending_range(
             JOB_STREAM_KEY,
             JOB_CONSUMER_GROUP,
             min="-",
             max="+",
-            count=limit,
+            count=fetch,
         )
     except Exception:
         return []
@@ -303,12 +359,16 @@ def list_pending_jobs(limit: int = 50) -> List[Dict[str, Any]]:
     for idx, (_idle, row) in enumerate(rows):
         if idx < running_slots:
             row = {**row, "state": "running"}
+        else:
+            # In Redis PEL but not in the active slot — show in the waiting lane.
+            row = {**row, "state": "waiting"}
         result.append(row)
     return result
 
 
 def list_waiting_jobs(limit: int = 50) -> List[Dict[str, Any]]:
     """Unclaimed jobs. Prefers the waiting set written on enqueue."""
+    prune_stale_waiting_jobs()
     pending_ids = {j["stream_id"] for j in list_pending_jobs(limit=500)}
     from_set = _list_waiting_from_set(limit, pending_ids)
     if from_set:
@@ -328,14 +388,12 @@ def _list_waiting_from_set(
     ids = sorted(str(item) for item in raw)
     result: List[Dict[str, Any]] = []
     for stream_id in ids:
-        if stream_id in pending_ids:
-            _unmark_waiting(stream_id)
-            continue
-        fields = _stream_entry_fields(stream_id)
+        sid = str(stream_id)
+        fields = _stream_entry_fields(sid)
         if not fields:
-            _unmark_waiting(stream_id)
+            _unmark_waiting(sid)
             continue
-        job = _parse_queued_job(stream_id, fields)
+        job = _parse_queued_job(sid, fields)
         enqueued_raw = fields.get("enqueued_at")
         enqueued_at = int(enqueued_raw) if enqueued_raw and str(enqueued_raw).isdigit() else None
         result.append(_job_to_dict(job, state="waiting", enqueued_at=enqueued_at))
@@ -381,7 +439,7 @@ def list_queue_jobs(
     state: str = "all",
     limit: int = 50,
 ) -> List[Dict[str, Any]]:
-    limit = max(1, min(limit, 200))
+    limit = max(1, min(limit, 500))
     if state == "waiting":
         return list_waiting_jobs(limit)
     if state in ("claimed", "running"):
@@ -392,8 +450,15 @@ def list_queue_jobs(
 
     waiting = list_waiting_jobs(limit)
     pending = list_pending_jobs(limit)
-    combined = waiting + pending
-    return combined[:limit]
+    merged: Dict[str, Dict[str, Any]] = {}
+    for row in waiting + pending:
+        sid = str(row.get("stream_id") or "")
+        if not sid:
+            continue
+        prev = merged.get(sid)
+        if not prev or row.get("state") == "running":
+            merged[sid] = row
+    return list(merged.values())[:limit]
 
 
 def get_queue_timeline(limit: int = 30) -> List[Dict[str, Any]]:

@@ -88,9 +88,9 @@ export function StageJobDetailPage() {
   }, [stream.currentStepId, stream.currentStageId, terminal]);
 
   const loadHistoricalStepLogs = useCallback(
-    async (stageId: string, stepId: string) => {
+    async (stageId: string, stepId: string, force = false) => {
       const key = stepKey(stageId, stepId);
-      if (historicalLogs[key]?.length) return;
+      if (!force && historicalLogs[key]?.length) return;
       try {
         const rows = await api.fetchJobStepLogs(journeyId, jobId, stageId, stepId);
         if (rows.length === 0) return;
@@ -108,6 +108,15 @@ export function StageJobDetailPage() {
     },
     [historicalLogs, journeyId, jobId, stream.hydrateStepLogs],
   );
+
+  useEffect(() => {
+    if (!selectedStep || terminal) return;
+    void loadHistoricalStepLogs(selectedStep.stageId, selectedStep.stepId, true);
+    const timer = window.setInterval(() => {
+      void loadHistoricalStepLogs(selectedStep.stageId, selectedStep.stepId, true);
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [selectedStep, terminal, loadHistoricalStepLogs]);
 
   useEffect(() => {
     if (!job || !terminal || stages.length === 0) return;

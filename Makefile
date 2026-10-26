@@ -98,16 +98,20 @@ test-bdd: ## Run behave BDD scenarios against the in-process harness
 	behave tests/bdd/features -f pretty -f behave_html_formatter:HTMLFormatter -o tests/reports/bdd.html
 
 .PHONY: test-endurance
-test-endurance: ## Run endurance smoke (skips @heavy)
-	$(PYTEST) tests/endurance -q -m "not heavy"
+test-endurance: ## Run endurance smoke (skips @heavy and @live)
+	$(PYTEST) tests/endurance -q -m "not heavy and not live"
 
 .PHONY: test-endurance-full
-test-endurance-full: ## Run the full endurance suite (incl. @heavy)
-	$(PYTEST) tests/endurance -q
+test-endurance-full: ## Run the full in-process endurance suite (incl. @heavy, no @live)
+	$(PYTEST) tests/endurance -q -m "not live"
+
+.PHONY: test-endurance-live
+test-endurance-live: ## Live cluster soak (needs ENDURANCE_BASE_URL; default 30m)
+	$(PYTEST) tests/endurance/live -q -m live
 
 .PHONY: test-all
 test-all: ## Run every tier sequentially
-	$(PYTEST) tests/unit tests/integration tests/contract tests/property tests/e2e tests/journeys tests/endurance -q -m "not heavy"
+	$(PYTEST) tests/unit tests/integration tests/contract tests/property tests/e2e tests/journeys tests/endurance -q -m "not heavy and not live"
 	$(MAKE) test-bdd
 
 .PHONY: coverage

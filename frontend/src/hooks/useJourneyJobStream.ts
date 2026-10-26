@@ -146,13 +146,16 @@ export function useJourneyJobStream(
       const es = new EventSource(`${base}/api/v1/journeys/${journeyId}/jobs/${jid}/stream`);
       esRef.current = es;
 
-      es.onopen = () => {
+      const markConnected = () => {
         reconnectRef.current = 0;
         setSseStatus("connected");
       };
 
+      es.onopen = () => markConnected();
+
       const parse = (handler: (data: Record<string, unknown>) => void) => (e: MessageEvent) => {
         try {
+          markConnected();
           handler(JSON.parse(e.data) as Record<string, unknown>);
         } catch {
           /* ignore */

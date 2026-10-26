@@ -1695,7 +1695,16 @@ class JourneyService:
         items = [row.pop("_item") for row in ready]
         if items:
             await loop.run_in_executor(None, executor.persist_job_items, items)
-            enqueue_jobs(ready)
+            try:
+                enqueue_jobs(ready)
+            except Exception as exc:
+                return JourneyResponse(
+                    status="error",
+                    message=f"Jobs created but enqueue failed: {exc}",
+                    operation="run_jobs_bulk",
+                    error_code="REDIS_UNAVAILABLE",
+                    error=str(exc),
+                )
 
         return JourneyResponse(
             status="success" if ready else "error",

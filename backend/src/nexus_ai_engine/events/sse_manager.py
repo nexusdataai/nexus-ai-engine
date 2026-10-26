@@ -277,6 +277,8 @@ class SSEManager:
         
         logger.info(f"📡 SSE subscriber connected for job {job_id} (total: {subscriber_count})")
 
+        yield ": connected\n\n"
+
         self._replay_history(job_id, event_queue)
         self._ensure_redis_listener(job_id, event_queue)
         

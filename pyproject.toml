@@ -134,6 +134,7 @@ addopts = "-v --tb=short"
 asyncio_mode = "auto"
 markers = [
     "heavy: long-running endurance scenarios skipped by default",
+    "live: requires ENDURANCE_BASE_URL and a running ai-engine deployment",
     "integration: requires moto-backed AWS mocks",
     "e2e: runs against in-process FastAPI harness",
     "bdd: behave-driven scenarios",

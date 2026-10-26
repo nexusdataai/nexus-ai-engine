@@ -71,6 +71,10 @@ Heavy endurance scenarios are tagged `@pytest.mark.heavy` and skipped by
 `make test-endurance`; run `make test-endurance-full` or trigger the nightly
 CI job to exercise them.
 
+Live cluster soak tests (`tests/endurance/live/`, `@pytest.mark.live`) enqueue
+all journeys via bulk-run for 30 minutes against `ENDURANCE_BASE_URL`. See
+`tests/endurance/README-live.md` and `make test-endurance-live`.
+
 ## Harness usage
 
 The shipped harness (`nexus_ai_engine.testing`) exposes everything tests need:

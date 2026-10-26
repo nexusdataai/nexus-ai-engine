@@ -63,14 +63,16 @@ export function QueueVisualization({ jobs, maxGlobal }: Props) {
     prevIds.current = nextIds;
   }, [jobs]);
 
-  const { waiting, running, claimed } = useMemo(() => {
-    const w = displayJobs.filter((j) => j.state === "waiting" && !j.leaving);
+  const { waiting, running } = useMemo(() => {
     const r = displayJobs.filter((j) => j.state === "running" && !j.leaving);
-    const c = displayJobs.filter((j) => j.state === "claimed" && !j.leaving);
-    return { waiting: w, running: r, claimed: c };
+    // Claimed = delivered to a worker but not executing yet (at global capacity).
+    const w = displayJobs.filter(
+      (j) => (j.state === "waiting" || j.state === "claimed") && !j.leaving,
+    );
+    return { waiting: w, running: r };
   }, [displayJobs]);
 
-  const slots = Array.from({ length: maxGlobal }, (_, i) => running[i] ?? claimed[i - running.length] ?? null);
+  const slots = Array.from({ length: maxGlobal }, (_, i) => running[i] ?? null);
 
   return (
     <div className="space-y-4">

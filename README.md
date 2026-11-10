@@ -1,24 +1,230 @@
 # nexus-ai-engine
 
-Journey/stage/job AI orchestration engine extracted from `nexus-backend`.
+**Nexus AI Engine** is the shared **compute plane** for running business and
+operations workflows at scale. Operators and product teams define **journeys**
+as declarative graphs; the engine compiles them, schedules work on a **worker
+fleet**, and runs each step as a **registered tool**—with retries, approvals,
+audit logs, and live progress—while **Nexus Ontology** stays the **data plane**
+(VDL queries, connectors, schema, credentials).
 
-Ships three things:
+Authoritative specs: [`docs/spec/README.md`](docs/spec/README.md) · operator
+guide: [`docs/user-guide/`](docs/user-guide/) · delivery plan:
+[`docs/dev-plan/000-master-plan.md`](docs/dev-plan/000-master-plan.md).
 
-- A **library core** of port-based services for journeys, jobs, prompts, logs,
-  reports, and SSE streaming. DynamoDB/S3 is the shipped default adapter;
-  other adapters can be supplied by consumers.
-- A **reference FastAPI + MCP server** (`nexus-ai-engine serve`) that composes
-  the library into a standalone HTTP + MCP surface matching nexus-backend's
-  existing API 1:1.
-- An **importable testing harness** (`nexus_ai_engine.testing`) that lets any
-  consumer exercise the engine in-process, including running plugin-journey
-  YAMLs end-to-end, without a backend or AWS account.
+---
 
-## Status
+## Business overview
 
-**Pre-release (`0.1.0a1`).** The public API is not yet stable. Expect churn
-during phases 2–9 of the extraction from
-[`nexus-backend`](https://github.com/nexusdataai/nexus-backend) until `0.1.0`.
+Enterprises want AI-assisted processes (order-to-cash, demand forecasting,
+inventory risk, call-quality journeys) without letting every user prompt re-run
+a full LLM “planner” on every batch. Nexus AI Engine turns those processes into
+**versioned, reviewable journeys** that run like production software: predictable
+cost, observable runs, and safe hand-off from copilot-assisted design to
+unattended execution.
+
+**Who uses it**
+
+| Persona | How they interact |
+|--------|-------------------|
+| **Operations / domain owners** | Journey Studio UI — browse journeys, start runs, cancel/retry, schedules, queue health |
+| **Platform / SRE** | Kubernetes deploy, worker scale, diagnostics, runbooks, DLQ |
+| **Product engineers** | Publish **tool packages**, wire ontology VDL/Connector APIs, embed the library or HTTP API |
+| **AI / copilot hosts** | Submit compiled journeys via REST, MCP, or SDK; monitor SSE |
+
+The engine does **not** replace Ontology’s knowledge graph, mapping rules, or
+connector vault. It **runs** what you defined once Ontology (or a copilot
+session) produced a journey.
+
+---
+
+## Why it exists
+
+It was **extracted from `nexus-backend`** so that:
+
+1. **Execution scales independently** from the ontology UI and control-plane APIs.
+2. **Many journeys run concurrently** on workers instead of inside a single API pod.
+3. **Tool compute lives in the engine**; ontology services expose a thin **VDL +
+   Connector** HTTP surface (see [041 Ontology Data Plane](docs/spec/041-ontology-data-plane-api.md)).
+4. **The same executor semantics as nexus-sre** (FSM, graph scheduling, retries,
+   verification) apply to **business DSL journeys**, not only infra remediation.
+
+That split keeps credentials and schema in Ontology and keeps CPU-heavy tool runs
+in a fleet that can autoscale on queue depth.
+
+---
+
+## Using it as an AI Engine (DAG workflow)
+
+A **journey** is a **directed workflow**:
+
+1. **Stages** form a **DAG** — each stage lists `depends_on: [other_stage_ids]`
+   so phases like `entity_resolution` → `three_way_match` → `exceptions` run
+   in order with explicit parallelism where allowed.
+2. **Steps** inside a stage are compiled into an **ExecutionGraph** (shared
+   contract with nexus-sre): sequential links, **parallel** fan-out, and
+   **`foreach`** over structured items.
+3. Each step names one **ReAct tool** from the **AI Engine tool registry** with
+   fixed `params` (often binding outputs from earlier steps, e.g. `$opportunities`).
+
+Typical lifecycle:
+
+```text
+Author journey (YAML/JSON DSL or Studio) → validate + version in store
+    → submit execution (API / schedule / MCP)
+    → JourneyCompiler → ExecutionGraph
+    → ExecutionManager tick loop → ToolDispatcher → tools (nexus-tool-sdk → Ontology APIs)
+    → logs/reports (S3) + SSE to UI
+```
+
+DSL details: [`docs/spec/010-journey-dsl.md`](docs/spec/010-journey-dsl.md) ·
+executor tick loop: [`docs/spec/020-execution-engine.md`](docs/spec/020-execution-engine.md).
+
+**Example shape** (simplified):
+
+```yaml
+apiVersion: nexus.ai/v1
+kind: Journey
+metadata:
+  id: order-to-cash-monitor
+  version: 3
+spec:
+  stages:
+    - id: entity_resolution
+      depends_on: []
+      steps:
+        - id: fetch_opportunities
+          tool: query_virtual_entity
+          params: { entity: Opportunity, limit: 500 }
+    - id: three_way_match
+      depends_on: [entity_resolution]
+      steps:
+        - id: match_lines
+          tool: o2c_match_order_delivery_invoice
+          params: { tolerance_pct: 0.01 }
+```
+
+---
+
+## How this reduces token consumption
+
+The engine is intentionally **not** an LLM inside the execution loop:
+
+| Approach | Token / cost impact |
+|----------|---------------------|
+| **DSL authored or revised in design time** (human, Journey Studio, copilot) | The graph is stored and replayed; runtime does not re-plan with an LLM each run. |
+| **Deterministic tool steps** | Each step is `tool` + `params`; workers call Python tools and Ontology APIs, not open-ended chat. |
+| **Planner / copilot stays in Ontology** | Reasoning produces or edits a journey **once**; submitters hand a versioned definition to the engine. |
+| **Structured step outputs** | Downstream steps consume JSON fields (`$item.foo`), avoiding huge narrative context in prompts. |
+| **Versioned prompts catalog** | Prompt templates are managed via the prompts API/UI for tools that *do* call models—not re-embedded on every orchestration tick. |
+
+Optional ReAct-style tools may still call an LLM **inside a single step**; the
+engine bounds that to the step’s inputs/outputs and retry policy instead of
+re-sending the full conversation history on every graph transition.
+
+---
+
+## Distributed jobs behind the agent
+
+When a user (or copilot) **starts a journey**, the API records work and **worker
+tiers** execute it off the request path:
+
+| Tier | Role |
+|------|------|
+| **API** | Auth (host), journey CRUD, submit execution, SSE, queue snapshots |
+| **Job queue** | Redis Streams (or compatible) admission, depth limits, DLQ, stale reclaim |
+| **Workers** | `job_worker` pool runs transformation/DSL jobs; **Temporal** workers (`RunExecutionWorkflow`) provide durable ticks for production |
+| **Tool runtime** | Loads published tool packages; calls Ontology over HTTP via `nexus-tool-sdk` |
+
+Concurrency is first-class: global caps (`MAX_CONCURRENT_JOBS`), per-journey
+`max_parallel_runs` / `max_parallel_steps`, and operator views (Queue,
+Operations, fleet diagnostics) in the React frontend.
+
+Spec: [`docs/spec/030-distributed-worker-runtime.md`](docs/spec/030-distributed-worker-runtime.md).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph submitters [Submitters]
+    UI[Journey Studio UI]
+    MCP[MCP clients]
+    Sched[Schedulers]
+    SDK[SDK and microservices]
+  end
+
+  subgraph ontology [Nexus Ontology data plane]
+    VDL[VDL query API]
+    Conn[Connector invoke API]
+    Schema[Schema mappings credentials]
+  end
+
+  subgraph engine [Nexus AI Engine compute plane]
+    API[FastAPI API SSE MCP]
+    Store[Journey DSL store]
+    Compiler[JourneyCompiler]
+    EM[ExecutionManager FSM]
+    Dispatch[ToolDispatcher]
+    Workers[Workers Redis Temporal pool]
+    Registry[Tool registry packages]
+  end
+
+  subgraph data [Persistence]
+    DDB[(DynamoDB journeys executions)]
+    S3[(S3 logs reports)]
+  end
+
+  submitters -->|POST executions| API
+  UI --> API
+  API --> Store
+  API --> EM
+  EM --> Compiler
+  EM --> Dispatch
+  Dispatch --> Registry
+  Registry --> Workers
+  Workers -->|HTTP| VDL
+  Workers -->|HTTP| Conn
+  EM --> DDB
+  Workers --> S3
+  API -->|SSE| UI
+  Schema -.-> VDL
+  Schema -.-> Conn
+```
+
+Deeper diagrams and deployment topology:
+[`docs/spec/001-system-architecture.md`](docs/spec/001-system-architecture.md) ·
+[`docs/spec/000-ai-engine-overview.md`](docs/spec/000-ai-engine-overview.md).
+
+---
+
+## Current state
+
+| Area | Status (repo `backend/VERSION` tracks API; see `VERSION` at repo root) |
+|------|--------|
+| Journey DSL models, validator, **compiler → ExecutionGraph** | Shipped |
+| **ExecutionManager**, FSM, tool dispatch, verification/retry hooks | Shipped (in-process + persistence paths) |
+| Reference **FastAPI** server (journeys, jobs, queue, executions, prompts, diagnostics) | Shipped |
+| **React Journey Studio** frontend (`frontend/`) | Shipped (evolving toward v0.3.0 GA scope) |
+| DynamoDB / S3 adapters, local K3s dev workflow | Shipped |
+| **Redis Streams job workers** (`job_worker`) | Shipped for queue-backed runs |
+| **Temporal** worker entrypoints | Present; production hardening per [v0.2.0 distributed runtime](docs/dev-plan/releases/v0.2.0-distributed-runtime.md) |
+| Tool packages + **nexus-tool-sdk** → Ontology VDL/Connector | In active use; registry model per [040](docs/spec/040-tool-registry-integration.md) |
+| **v1.0.0** production GA (decouple legacy backend, full fleet UAT) | Planned — [master plan](docs/dev-plan/000-master-plan.md) |
+
+**Stability:** Semver is past the original `0.1.0a1` extraction; APIs and contracts
+are still tightening toward **v1.0.0**. Pin releases in production; see
+[Integration guidelines](#integration-guidelines) and `docs/spec/ROUTE_PARITY.md`.
+
+---
+
+## What ships in this repo
+
+- A **library core** (`nexus_ai_engine`) — journeys, executor, adapters, services.
+- A **reference FastAPI + MCP server** (`nexus-ai-engine serve`) and **workers**.
+- A **Journey Studio** React app and embedded UI assets in the Python package.
+- An **importable testing harness** (`nexus_ai_engine.testing`) for in-process
+  and HTTP-smoke tests without AWS (see [Testing](#testing)).
 
 ## Install
 
@@ -202,11 +408,10 @@ Legacy standalone EKS deploy (IAM, CloudFormation, `deploy-and-test.sh`): [scrip
 
 ---
 
-Health/readiness/version plus the journey/job/logs/reports/prompts/schedules
-routes are all live against an in-memory engine, so the reference server is
-exercisable end-to-end today. See [docs/spec/ROUTE_PARITY.md](docs/spec/ROUTE_PARITY.md)
-for the canonical surface; handlers will swap their backing repository to
-DynamoDB in phase 10 without changing the router contract.
+Health/readiness/version plus journey/job/queue/execution/logs/reports/prompts
+routes are exercised in CI and local K3s against in-memory and DynamoDB-backed
+configs. See [docs/spec/ROUTE_PARITY.md](docs/spec/ROUTE_PARITY.md) for the
+canonical HTTP surface.
 
 ## Embedded journey studio UI
 
@@ -253,9 +458,9 @@ the one that matches your host application; the underlying core is the same.
 | 4. Connect via MCP | LLM clients (Claude Desktop, Cursor, custom MCP hosts) | `[server]` extra (phase 7+) | stdio / HTTP MCP |
 | 5. Use the harness in your own tests | Anyone — the harness is import-safe at any time | `nexus-ai-engine[harness]` | Test-time only |
 
-Modes 1 + 5 are usable today. Mode 2 is usable today but the routers return
-501 until phases 5–9 land. Mode 3 follows mode 2. Mode 4 activates in
-phase 7.
+Modes 1–3 and 5 are usable today against the reference server and K3s
+deployments. MCP (mode 4) is available on the server CLI; confirm tool parity
+for your client in [ROUTE_PARITY.md](docs/spec/ROUTE_PARITY.md).
 
 ### Mode 1 — Embed as a Python library
 
@@ -278,10 +483,10 @@ config = EngineConfig(
 
 engine = build_engine(config)
 
-# Once phases 5+ land, services become available:
+# Services are available on the built engine object (exact surface varies by release):
 #   journey_id = await engine.journeys.create(...)
-#   job_id     = await engine.jobs.run(journey_id, stage_id, ...)
-#   logs       = await engine.logs.get(journey_id, job_id, step_id)
+#   job_id     = await engine.jobs.run(...)
+#   logs       = await engine.logs.get(...)
 ```
 
 Custom domain stages register at startup via the stage registry (activates
@@ -369,9 +574,9 @@ Health probes for Kubernetes / your load balancer:
 
 ### Mode 4 — Connect via MCP
 
-When phase 7 lands, the same library backs an MCP server exposing the
-`journey_tool` and `logs_and_reports_tool` tools (1:1 schema parity with
-nexus-backend so existing MCP clients work unchanged):
+The reference server can expose MCP tools (journey, logs/reports, and related
+surfaces—see [ROUTE_PARITY](docs/spec/ROUTE_PARITY.md)) so clients such as
+Claude Desktop or Cursor can submit and inspect runs without custom HTTP glue:
 
 ```bash
 # stdio (Claude Desktop, Cursor)
@@ -443,8 +648,9 @@ authoritative names are:
 | `S3_JOURNEY_REPORTS_BUCKET`        | `s3_journey_reports_bucket`       | 6 |
 | `MAX_CONCURRENT_JOBS`              | `max_concurrent_jobs`             | 7 |
 
-Until a phase activates, its env vars are **not** required. The reference
-server starts cleanly with zero AWS configuration today (routes 501).
+For local dev, use in-memory adapters or K3s-backed DynamoDB (see
+[K3s-backed local dev](#k3s-backed-local-dev-recommended)). Production requires
+table and bucket names in `EngineConfig`.
 
 ### Choose your storage adapters
 
@@ -481,28 +687,11 @@ These are intentionally **out of scope** for the library:
 
 ### Versioning policy
 
-- `0.1.0a1` ... `0.1.0aN` during phases 2–9. Pin to git `main` or to a
-  specific alpha tag.
-- `0.1.0` once the route surface and contracts stabilize. Semver from then on.
-- Pre-1.0 minor releases may make backwards-incompatible changes. Pin
-  exactly until 1.0.
+- Release lines follow [`docs/dev-plan/`](docs/dev-plan/README.md) (v0.2.x … v1.0.0).
+- Pin **image tags** and **Python package versions** in production until v1.0.0 GA.
+- Pre-1.0 minors may include contract adjustments; run `make test-all` when upgrading.
 
-A consumer-facing `CHANGELOG.md` lands at the first stable release; until
-then the master extraction plan and this README are authoritative.
-
-### Stability matrix (today)
-
-| Surface | Stability |
-|---------|-----------|
-| `EngineConfig` field names                         | Stable |
-| `EngineError` hierarchy                            | Stable |
-| Package import paths under `nexus_ai_engine.*`     | Stable |
-| `nexus_ai_engine.server.create_app` signature      | Stable |
-| Testing harness public API                         | Stable for the alpha series |
-| Service method signatures                          | In flux (lands phases 5–9) |
-| Adapter constructor signatures                     | In flux (lands phase 3) |
-| Stage registry contract                            | In flux (lands phase 8) |
-| MCP tool schemas                                   | Locked to nexus-backend's; activate phase 7 |
+See [Current state](#current-state) above; [`CHANGELOG.md`](CHANGELOG.md) when present for release notes.
 
 ## Testing
 

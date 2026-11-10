@@ -234,6 +234,15 @@ def _cmd_run_journey(args: argparse.Namespace) -> int:
     return 0 if result.ok else 3
 
 
+def _cmd_run_agent(args: argparse.Namespace) -> int:
+    print(
+        "run-agent moved to switchpoint-prototype/runtime. "
+        "Use: switchpoint-runtime or pip install -e switchpoint-prototype/runtime",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="nexus-ai-engine")
     parser.add_argument(
@@ -296,6 +305,12 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run-journey", help="Execute a plugin-journey YAML end-to-end")
     run.add_argument("path", help="Path to a plugin-journey YAML file")
     run.set_defaults(func=_cmd_run_journey)
+
+    agent = sub.add_parser("run-agent", help="Debug embedded agent runtime (SDK owns LLM)")
+    agent.add_argument("--plugin", required=True, help="Path to plugin root")
+    agent.add_argument("--agent", required=True, help="Agent name")
+    agent.add_argument("--task", default="Run mission", help="Task description")
+    agent.set_defaults(func=_cmd_run_agent)
 
     pdj = sub.add_parser(
         "print-demo-journeys",

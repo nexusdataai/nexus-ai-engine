@@ -145,52 +145,83 @@ Spec: [`docs/spec/030-distributed-worker-runtime.md`](docs/spec/030-distributed-
 
 ## Architecture
 
+```text
+                    ┌──────────── Submitters ────────────┐
+                    │ Journey Studio · MCP · Schedulers  │
+                    │            SDK / services          │
+                    └─────────────────┬──────────────────┘
+                                      │ REST / MCP (submit)
+                                      ▼
+┌──────────────────────── Nexus AI Engine (compute) ─────────────────────────┐
+│  FastAPI (+ SSE) ──► Journey store ──► ExecutionManager ──► ToolDispatcher │
+│                           │                      │              │            │
+│                           │                      ▼              ▼            │
+│                           │               JourneyCompiler   Tool registry  │
+│                           │                      │              │            │
+│                           ▼                      ▼              ▼            │
+│                    DynamoDB state          Worker pool ◄── published tools   │
+└───────────────────────────────┬──────────────────────────────┬───────────────┘
+                                │                              │ HTTP
+                                │ logs/reports                 ▼
+                                ▼                    ┌── Ontology (data) ──┐
+                             S3 artifacts            │ VDL · Connectors    │
+                                                     │ schema · credentials│
+                                                     └─────────────────────┘
+```
+
+<details>
+<summary>Mermaid (GitHub / viewers that support diagram blocks)</summary>
+
 ```mermaid
 flowchart TB
   subgraph submitters [Submitters]
-    UI[Journey Studio UI]
-    MCP[MCP clients]
-    Sched[Schedulers]
-    SDK[SDK and microservices]
+    journeyUi[Journey Studio UI]
+    mcpClients[MCP clients]
+    schedulers[Schedulers]
+    sdkClients[SDK and microservices]
   end
 
-  subgraph ontology [Nexus Ontology data plane]
-    VDL[VDL query API]
-    Conn[Connector invoke API]
-    Schema[Schema mappings credentials]
+  subgraph ontologyPlane [Nexus Ontology data plane]
+    vdlApi[VDL query API]
+    connectorApi[Connector invoke API]
+    schemaLayer[Schema mappings credentials]
   end
 
-  subgraph engine [Nexus AI Engine compute plane]
-    API[FastAPI API SSE MCP]
-    Store[Journey DSL store]
-    Compiler[JourneyCompiler]
-    EM[ExecutionManager FSM]
-    Dispatch[ToolDispatcher]
-    Workers[Workers Redis Temporal pool]
-    Registry[Tool registry packages]
+  subgraph computePlane [Nexus AI Engine compute plane]
+    fastApi[FastAPI API SSE MCP]
+    dslStore[Journey DSL store]
+    compiler[JourneyCompiler]
+    execMgr[ExecutionManager FSM]
+    toolDispatch[ToolDispatcher]
+    workerPool[Workers Redis Temporal pool]
+    toolRegistry[Tool registry packages]
   end
 
-  subgraph data [Persistence]
-    DDB[(DynamoDB journeys executions)]
-    S3[(S3 logs reports)]
+  subgraph persistence [Persistence]
+    dynamoDb[("DynamoDB journeys executions")]
+    s3Bucket[("S3 logs reports")]
   end
 
-  submitters -->|POST executions| API
-  UI --> API
-  API --> Store
-  API --> EM
-  EM --> Compiler
-  EM --> Dispatch
-  Dispatch --> Registry
-  Registry --> Workers
-  Workers -->|HTTP| VDL
-  Workers -->|HTTP| Conn
-  EM --> DDB
-  Workers --> S3
-  API -->|SSE| UI
-  Schema -.-> VDL
-  Schema -.-> Conn
+  sdkClients -->|POST executions| fastApi
+  mcpClients --> fastApi
+  schedulers --> fastApi
+  journeyUi --> fastApi
+  fastApi --> dslStore
+  fastApi --> execMgr
+  execMgr --> compiler
+  execMgr --> toolDispatch
+  toolDispatch --> toolRegistry
+  toolRegistry --> workerPool
+  workerPool -->|HTTP| vdlApi
+  workerPool -->|HTTP| connectorApi
+  execMgr --> dynamoDb
+  workerPool --> s3Bucket
+  fastApi -->|SSE| journeyUi
+  schemaLayer -.-> vdlApi
+  schemaLayer -.-> connectorApi
 ```
+
+</details>
 
 Deeper diagrams and deployment topology:
 [`docs/spec/001-system-architecture.md`](docs/spec/001-system-architecture.md) ·

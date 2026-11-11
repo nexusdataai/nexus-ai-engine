@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import {
-  Background,
   Controls,
   MiniMap,
   ReactFlow,
@@ -11,18 +10,16 @@ import "@xyflow/react/dist/style.css";
 
 import type { ExecutionGraph, ExecutionNodeState } from "@/types/api";
 
-const NODE_COLORS: Record<string, string> = {
-  pending: "#64748b",
-  PENDING: "#64748b",
-  running: "#3b82f6",
-  RUNNING: "#3b82f6",
-  succeeded: "#22c55e",
-  SUCCEEDED: "#22c55e",
-  failed: "#ef4444",
-  FAILED: "#ef4444",
-  skipped: "#94a3b8",
-  SKIPPED: "#94a3b8",
+const TOKEN: Record<string, string> = {
+  pending: "hsl(var(--border-strong))",
+  running: "hsl(var(--brand))",
+  succeeded: "hsl(var(--success))",
+  completed: "hsl(var(--success))",
+  failed: "hsl(var(--destructive))",
+  skipped: "hsl(var(--border-strong))",
+  cancelled: "hsl(var(--warning))",
 };
+const nodeColor = (status: string) => TOKEN[String(status).toLowerCase()] ?? TOKEN.pending;
 
 function layoutNodes(
   graph: ExecutionGraph,
@@ -43,10 +40,12 @@ function layoutNodes(
       },
       position: { x: col * 220, y: row * 100 },
       style: {
-        border: `2px solid ${NODE_COLORS[status] ?? NODE_COLORS.pending}`,
-        borderRadius: 8,
-        padding: 8,
-        fontSize: 12,
+        border: `1.5px solid ${nodeColor(status)}`,
+        borderRadius: 10,
+        padding: "8px 12px",
+        fontSize: 13,
+        fontFamily: "var(--font-sans)",
+        boxShadow: "var(--shadow-xs)",
         background: "hsl(var(--card))",
         color: "hsl(var(--foreground))",
         minWidth: 140,
@@ -95,15 +94,14 @@ export function ExecutionGraphView({
   if (!graph) {
     return (
       <div className={className}>
-        <p className="text-sm text-muted-foreground">Graph not available yet.</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">Graph not available yet.</p>
       </div>
     );
   }
 
   return (
-    <div className={className} style={{ height: 360 }} aria-label="Execution graph">
+    <div className={`canvas-dots overflow-hidden rounded-lg border border-border ${className ?? ""}`} style={{ height: 420 }} aria-label="Execution graph">
       <ReactFlow nodes={nodes} edges={edges} fitView nodesDraggable={false} nodesConnectable={false}>
-        <Background />
         <Controls showInteractive={false} />
         <MiniMap pannable zoomable />
       </ReactFlow>

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Calendar, Clock, Loader2, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react";
 
-import { EmptyState } from "@/components/EmptyState";
+import { Icon } from "@/components/ds/Icon";
+import { EmptyState, Field, InlineError, Modal, Notice, Panel, SkeletonRows, StatusPill } from "@/components/ds/kit";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { api } from "@/services/api";
 import type { ScheduleRow, SimpleJourneySummary } from "@/types/api";
 
@@ -32,7 +32,7 @@ const TIMEZONES = [
 ];
 
 const INTERVAL_LABELS: Record<number, string> = Object.fromEntries(
-  INTERVAL_PRESETS.map((p) => [p.value, p.label.replace("Every ", "")]),
+  INTERVAL_PRESETS.map((p) => [p.value, p.label]),
 );
 
 function formatInterval(minutes: number): string {
@@ -53,17 +53,24 @@ function formatTime(iso?: string | null): string {
   }
 }
 
-function statusColor(status?: string | null): string {
-  switch (status) {
-    case "in_progress":
-      return "bg-blue-100 text-blue-700";
-    case "completed":
-      return "bg-green-100 text-green-700";
-    case "failed":
-      return "bg-red-100 text-red-700";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
+/** On / off switch. Same behaviour as a checkbox, clearer for "enabled". */
+function Switch({ checked, disabled, onChange, label }: { checked: boolean; disabled?: boolean; onChange: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onChange}
+      className={cn(
+        "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50",
+        checked ? "border-primary bg-primary" : "border-border-strong bg-surface-3",
+      )}
+    >
+      <span className={cn("inline-block h-3.5 w-3.5 rounded-full bg-white shadow-xs transition-transform duration-200 ease-brand", checked ? "translate-x-[18px]" : "translate-x-0.5")} />
+    </button>
+  );
 }
 
 type DialogState = { mode: "create" } | { mode: "edit"; schedule: ScheduleRow } | null;
@@ -96,6 +103,7 @@ export function BatchSchedulesPanel({
 
   const rows = data?.data ?? [];
   const anyEnabled = rows.some((s) => s.enabled);
+  const enabledCount = rows.filter((s) => s.enabled).length;
 
   useEffect(() => {
     if (!anyEnabled) return;
@@ -122,132 +130,121 @@ export function BatchSchedulesPanel({
     journeyName && id === journeyId ? journeyName : journeys.find((j) => j.journeyId === id)?.name || id;
 
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between gap-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Calendar className="h-4 w-4" />
-            Batch Schedules
-          </CardTitle>
-          <div className="flex items-center gap-1">
-            <Button size="sm" variant="outline" onClick={() => setDialog({ mode: "create" })}>
-              <Plus className="h-3 w-3" />
-              Create Schedule
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching}>
-              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
-            </Button>
-          </div>
+    <Panel
+      title="Batch Schedules"
+      description={rows.length > 0 ? `${enabledCount} of ${rows.length} enabled` : undefined}
+      flush
+      actions={
+        <>
+          <Button variant="ghost" size="icon-sm" aria-label="Refresh schedules" onClick={() => refetch()} disabled={isFetching}>
+            <Icon name="refresh" className={isFetching ? "animate-spin" : undefined} />
+          </Button>
+          <Button size="sm" onClick={() => setDialog({ mode: "create" })}>
+            <Icon name="plus" />
+            Create Schedule
+          </Button>
+        </>
+      }
+    >
+      {isLoading ? (
+        <SkeletonRows rows={4} />
+      ) : error ? (
+        <div className="p-4 sm:p-5">
+          <InlineError onRetry={() => refetch()}>Could not load schedules. {String(error)}</InlineError>
         </div>
-      </CardHeader>
-      <CardContent>
-        {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : error ? (
-          <EmptyState title="Could not load schedules" description={String(error)} />
-        ) : rows.length === 0 ? (
-          <EmptyState title="No batch schedules configured" description="Create a schedule to run this journey on an interval." />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-muted-foreground">
-                  <th className="pb-2 pr-4 font-medium">Journey / Stage</th>
-                  <th className="pb-2 pr-4 font-medium">Interval</th>
-                  <th className="pb-2 pr-4 font-medium">Last Run</th>
-                  <th className="pb-2 pr-4 font-medium">Next Run</th>
-                  <th className="pb-2 pr-4 font-medium">Status</th>
-                  <th className="pb-2 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((s) => (
-                  <tr key={s.scheduleId} className="border-b border-border/50 last:border-0">
-                    <td className="py-3 pr-4">
-                      <div className="font-medium">{labelFor(s.journeyId)}</div>
-                      <div className="text-xs text-muted-foreground">{s.stageId || "All stages"}</div>
-                    </td>
-                    <td className="py-3 pr-4">
-                      <span className="inline-flex rounded-full border px-2 py-0.5 text-xs">
-                        {formatInterval(s.intervalMinutes)}
+      ) : rows.length === 0 ? (
+        <EmptyState bare icon="calendar" title="No batch schedules configured" description="Create a schedule to run this journey on an interval." />
+      ) : (
+        <div className="scroll-thin overflow-x-auto">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Journey / Stage</th>
+                <th>Interval</th>
+                <th>Last Run</th>
+                <th>Next Run</th>
+                <th>Status</th>
+                <th className="r">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.scheduleId}>
+                  <td className="max-w-[320px]">
+                    <div className="truncate font-medium text-foreground">{labelFor(s.journeyId)}</div>
+                    <div className="truncate text-xs text-muted-foreground">{s.stageId || "All stages"}</div>
+                  </td>
+                  <td className="whitespace-nowrap">{formatInterval(s.intervalMinutes)}</td>
+                  <td>
+                    <div className="whitespace-nowrap text-muted-foreground">{formatTime(s.lastRunAt)}</div>
+                    {s.lastJobStatus ? <StatusPill status={s.lastJobStatus} className="mt-0.5" /> : null}
+                  </td>
+                  <td className="whitespace-nowrap">
+                    {s.enabled ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Icon name="clock" className="h-3.5 w-3.5 text-subtle-foreground" />
+                        {formatTime(s.nextRunAt)}
                       </span>
-                    </td>
-                    <td className="py-3 pr-4 text-xs">
-                      <div>{formatTime(s.lastRunAt)}</div>
-                      {s.lastJobStatus ? (
-                        <span className={`mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColor(s.lastJobStatus)}`}>
-                          {s.lastJobStatus}
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="py-3 pr-4 text-xs">
-                      {s.enabled ? (
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {formatTime(s.nextRunAt)}
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">Paused</span>
-                      )}
-                    </td>
-                    <td className="py-3 pr-4">
-                      <input
-                        type="checkbox"
-                        checked={s.enabled}
-                        disabled={toggling === s.scheduleId}
-                        onChange={async () => {
-                          setToggling(s.scheduleId);
+                    ) : (
+                      <span className="text-subtle-foreground">Paused</span>
+                    )}
+                  </td>
+                  <td>
+                    <Switch
+                      label={`${s.enabled ? "Pause" : "Enable"} schedule for ${labelFor(s.journeyId)}`}
+                      checked={s.enabled}
+                      disabled={toggling === s.scheduleId}
+                      onChange={async () => {
+                        setToggling(s.scheduleId);
+                        try {
+                          await toggle.mutateAsync(s.scheduleId);
+                        } finally {
+                          setToggling(null);
+                        }
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={runningNow === s.scheduleId}
+                        onClick={async () => {
+                          setRunningNow(s.scheduleId);
                           try {
-                            await toggle.mutateAsync(s.scheduleId);
+                            await runNow.mutateAsync(s.scheduleId);
                           } finally {
-                            setToggling(null);
+                            setRunningNow(null);
                           }
                         }}
-                      />
-                    </td>
-                    <td className="py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-green-700"
-                          disabled={runningNow === s.scheduleId}
-                          onClick={async () => {
-                            setRunningNow(s.scheduleId);
-                            try {
-                              await runNow.mutateAsync(s.scheduleId);
-                            } finally {
-                              setRunningNow(null);
-                            }
-                          }}
-                        >
-                          {runningNow === s.scheduleId ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Play className="h-3.5 w-3.5" />
-                          )}
-                          Run Now
-                        </Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setDialog({ mode: "edit", schedule: s })}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 w-7 p-0 text-red-500"
-                          onClick={() => remove.mutate(s.scheduleId)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
+                      >
+                        <Icon name={runningNow === s.scheduleId ? "spinner" : "play"} className={runningNow === s.scheduleId ? "animate-spin" : undefined} />
+                        Run Now
+                      </Button>
+                      <Button variant="ghost" size="icon-sm" aria-label="Edit schedule" title="Edit" onClick={() => setDialog({ mode: "edit", schedule: s })}>
+                        <Icon name="edit" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Delete schedule"
+                        title="Delete"
+                        className="hover:text-destructive"
+                        onClick={() => {
+                          if (window.confirm(`Delete the schedule for "${labelFor(s.journeyId)}"?`)) remove.mutate(s.scheduleId);
+                        }}
+                      >
+                        <Icon name="trash" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {dialog ? (
         <ScheduleDialog
@@ -266,7 +263,7 @@ export function BatchSchedulesPanel({
           }}
         />
       ) : null}
-    </Card>
+    </Panel>
   );
 }
 
@@ -338,61 +335,73 @@ function ScheduleDialog({
     }
   };
 
+  const journeyLabel = journeys.find((j) => j.journeyId === journeyId)?.name;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-lg border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="border-b px-6 py-4">
-          <h3 className="flex items-center gap-2 text-lg font-semibold">
-            <Calendar className="h-5 w-5" />
-            {isEdit ? "Edit Batch Schedule" : "Create Batch Schedule"}
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            {journeys.find((j) => j.journeyId === journeyId)?.name
-              ? `Schedule periodic execution for "${journeys.find((j) => j.journeyId === journeyId)?.name}"`
-              : "Timezone is stored only. Jobs fire on UTC."}
-          </p>
-        </div>
-        <div className="space-y-4 px-6 py-4">
-          {!lockedJourneyId ? (
-            <label className="block space-y-1 text-sm">
-              <span>Journey</span>
-              <select
-                className="h-9 w-full rounded-md border bg-background px-2"
-                value={journeyId}
-                disabled={isEdit}
-                onChange={(e) => {
-                  setJourneyId(e.target.value);
-                  setStageId("");
-                }}
-              >
-                {journeys.map((j) => (
-                  <option key={j.journeyId} value={j.journeyId}>
-                    {j.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          <label className="block space-y-1 text-sm">
-            <span>Stage (optional)</span>
+    <Modal
+      open
+      onClose={onClose}
+      className="max-w-lg"
+      title={isEdit ? "Edit Batch Schedule" : "Create Batch Schedule"}
+      description={
+        journeyLabel
+          ? `Schedule periodic execution for "${journeyLabel}"`
+          : "Timezone is stored only. Jobs fire on UTC."
+      }
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={() => void handleSave()} disabled={saving}>
+            {saving ? <Icon name="spinner" className="animate-spin" /> : null}
+            {isEdit ? "Update" : "Create Schedule"}
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {!lockedJourneyId ? (
+          <Field label="Journey" htmlFor="sched-journey">
             <select
-              className="h-9 w-full rounded-md border bg-background px-2"
-              value={stageId}
+              id="sched-journey"
+              className="field"
+              value={journeyId}
               disabled={isEdit}
-              onChange={(e) => setStageId(e.target.value)}
+              onChange={(e) => {
+                setJourneyId(e.target.value);
+                setStageId("");
+              }}
             >
-              <option value="">All stages (journey-level)</option>
-              {stages.map((stage) => (
-                <option key={stage.id} value={stage.id}>
-                  {stage.name}
+              {journeys.map((j) => (
+                <option key={j.journeyId} value={j.journeyId}>
+                  {j.name}
                 </option>
               ))}
             </select>
-          </label>
-          <label className="block space-y-1 text-sm">
-            <span>Run Interval</span>
+          </Field>
+        ) : null}
+        <Field label="Stage (optional)" htmlFor="sched-stage">
+          <select
+            id="sched-stage"
+            className="field"
+            value={stageId}
+            disabled={isEdit}
+            onChange={(e) => setStageId(e.target.value)}
+          >
+            <option value="">All stages (journey-level)</option>
+            {stages.map((stage) => (
+              <option key={stage.id} value={stage.id}>
+                {stage.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Run Interval" htmlFor="sched-interval">
             <select
-              className="h-9 w-full rounded-md border bg-background px-2"
+              id="sched-interval"
+              className="field"
               value={intervalMinutes}
               onChange={(e) => setIntervalMinutes(e.target.value)}
             >
@@ -402,11 +411,11 @@ function ScheduleDialog({
                 </option>
               ))}
             </select>
-          </label>
-          <label className="block space-y-1 text-sm">
-            <span>Timezone</span>
+          </Field>
+          <Field label="Timezone" htmlFor="sched-tz" hint="Stored only. Jobs fire on UTC.">
             <select
-              className="h-9 w-full rounded-md border bg-background px-2"
+              id="sched-tz"
+              className="field"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
             >
@@ -416,32 +425,20 @@ function ScheduleDialog({
                 </option>
               ))}
             </select>
-          </label>
-          <label className="flex items-center justify-between text-sm">
-            <span>
-              Enabled
-              <span className="block text-xs text-muted-foreground">Start scheduling immediately</span>
-            </span>
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          </label>
-          {enabled && nextRunPreview ? (
-            <div className="flex items-center gap-2 rounded-md border p-3 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4" />
-              First run approximately at {nextRunPreview}
-            </div>
-          ) : null}
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          </Field>
         </div>
-        <div className="flex justify-end gap-2 border-t px-6 py-4">
-          <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={() => void handleSave()} disabled={saving}>
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            {isEdit ? "Update" : "Create Schedule"}
-          </Button>
+        <div className="flex items-center justify-between gap-4 border-t border-border pt-4 text-sm">
+          <span className="text-foreground">
+            Enabled
+            <span className="block text-xs text-muted-foreground">Start scheduling immediately</span>
+          </span>
+          <Switch label="Enabled" checked={enabled} onChange={() => setEnabled((v) => !v)} />
         </div>
+        {enabled && nextRunPreview ? (
+          <Notice tone="neutral">First run approximately at {nextRunPreview}</Notice>
+        ) : null}
+        {error ? <InlineError>{error}</InlineError> : null}
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -1,25 +1,22 @@
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, CheckCircle, Clock, Shield, Wifi } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Icon } from "@/components/ds/Icon";
+import { LiveBadge, Segmented, Skeleton, StatusPill, type ChipOption } from "@/components/ds/kit";
 import { api } from "@/services/api";
 import type { SlaPillar, SlaPillarId, SlaStatus } from "@/types/monitoring";
 import { SLA_PILLAR_ORDER } from "@/types/monitoring";
 
 import { HealthTimeline } from "./HealthTimeline";
+import { SectionHeader, healthTone } from "./parts";
 import { SlaDetailDrawer } from "./SlaDetailDrawer";
 
 export type SlaWindow = "1h" | "24h";
 
-const PILLAR_ICONS: Record<SlaPillarId, ReactNode> = {
-  performance: <Activity className="h-5 w-5" />,
-  availability: <Wifi className="h-5 w-5" />,
-  reliability: <CheckCircle className="h-5 w-5" />,
-  security: <Shield className="h-5 w-5" />,
-  compliance: <Clock className="h-5 w-5" />,
-};
+const WINDOWS: ChipOption<SlaWindow>[] = [
+  { value: "1h", label: "Last 1h" },
+  { value: "24h", label: "Last 24h" },
+];
 
 const LABELS: Record<SlaPillarId, string> = {
   performance: "Performance",
@@ -28,15 +25,6 @@ const LABELS: Record<SlaPillarId, string> = {
   security: "Security",
   compliance: "Compliance",
 };
-
-const statusClass = (s: string) =>
-  s === "healthy"
-    ? "bg-green-600 text-white"
-    : s === "warning"
-      ? "bg-yellow-600 text-white"
-      : s === "unknown"
-        ? "bg-gray-500 text-white"
-        : "bg-red-600 text-white";
 
 const normalizeStatus = (s?: string): SlaStatus => {
   if (s === "warning" || s === "critical" || s === "healthy" || s === "unknown") return s;
@@ -48,7 +36,6 @@ function pillarToCard(id: SlaPillarId, pillar: SlaPillar | undefined) {
     return {
       id,
       title: LABELS[id],
-      icon: PILLAR_ICONS[id],
       value: "—",
       unit: "%",
       status: "unknown" as SlaStatus,
@@ -58,13 +45,14 @@ function pillarToCard(id: SlaPillarId, pillar: SlaPillar | undefined) {
   return {
     id,
     title: LABELS[id],
-    icon: PILLAR_ICONS[id],
     value: String(Math.round(pillar.score * 10) / 10),
     unit: "%",
     status: normalizeStatus(pillar.status),
     details: pillar.summary_metrics?.map((m) => ({ label: m.label, value: m.value })) ?? [],
   };
 }
+
+const CELL = "border-b border-r border-border p-4 sm:px-5";
 
 export function MonitoringSection() {
   const [window, setWindow] = useState<SlaWindow>("1h");
@@ -87,87 +75,73 @@ export function MonitoringSection() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-semibold">System Monitoring</h3>
-          {!isLoading && overallScore != null ? (
-            <p className="text-sm text-muted-foreground mt-0.5">
-              Overall SLA:{" "}
-              <span className="font-medium text-foreground">{overallScore.toFixed(1)}%</span>
-              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${statusClass(overallStatus)}`}>
-                {overallStatus}
-              </span>
-            </p>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-            value={window}
-            onChange={(e) => setWindow(e.target.value as SlaWindow)}
-            aria-label="SLA window"
-          >
-            <option value="1h">Last 1h</option>
-            <option value="24h">Last 24h</option>
-          </select>
-          <span className="rounded-full border px-2 py-0.5 text-xs">Live</span>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <SectionHeader
+        title="System Monitoring"
+        meta={
+          !isLoading && overallScore != null ? (
+            <StatusPill variant="soft" tone={healthTone(overallStatus)}>
+              {overallStatus}
+            </StatusPill>
+          ) : null
+        }
+        description={
+          !isLoading && overallScore != null ? (
+            <>
+              Overall SLA: <span className="num font-medium text-foreground">{overallScore.toFixed(1)}%</span>
+            </>
+          ) : null
+        }
+        actions={
+          <>
+            <LiveBadge live />
+            <Segmented options={WINDOWS} value={window} onChange={setWindow} label="SLA window" />
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {isLoading
-          ? Array.from({ length: 5 }).map((_, i) => (
-              <Card key={i}>
-                <CardContent className="pt-6">
-                  <div className="h-24 animate-pulse rounded bg-muted" />
-                </CardContent>
-              </Card>
-            ))
-          : metrics.map((m) => (
-              <Card
-                key={m.id}
-                className="cursor-pointer transition-colors hover:border-primary/50"
-                onClick={() => openPillar(m.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    openPillar(m.id);
-                  }
-                }}
-              >
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2">
-                      {m.icon}
-                      {m.title}
-                    </span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${statusClass(m.status)}`}>
-                      {m.status}
-                    </span>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="mb-3 text-3xl font-bold">
+      {/* One strip, divided by hairlines; each pillar opens its breakdown. */}
+      <div className="overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+        <div className="-mb-px -mr-px grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          {isLoading
+            ? Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className={CELL} aria-busy="true">
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="mt-3 h-7 w-16" />
+                  <Skeleton className="mt-4 h-3 w-full" />
+                  <Skeleton className="mt-2 h-3 w-2/3" />
+                </div>
+              ))
+            : metrics.map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => openPillar(m.id)}
+                  className={`${CELL} group flex min-w-0 flex-col text-left transition-colors duration-150 hover:bg-surface-2/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring`}
+                >
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm text-muted-foreground">{m.title}</span>
+                    <StatusPill tone={healthTone(m.status)}>{m.status}</StatusPill>
+                  </span>
+                  <span className="num mt-2 block text-2xl font-medium tracking-tight text-foreground">
                     {m.value}
-                    <span className="text-lg text-muted-foreground">{m.unit}</span>
-                  </div>
-                  <div className="space-y-1">
+                    <span className="ml-0.5 text-base text-muted-foreground">{m.unit}</span>
+                  </span>
+                  <span className="mt-3 block flex-1 space-y-1">
                     {m.details.map((d) => (
-                      <div key={d.label} className="flex justify-between text-xs text-muted-foreground">
-                        <span>{d.label}</span>
-                        <span className="font-medium">{d.value}</span>
-                      </div>
+                      <span key={d.label} className="flex justify-between gap-3 text-xs">
+                        <span className="truncate text-muted-foreground">{d.label}</span>
+                        <span className="num truncate font-medium text-foreground">{d.value}</span>
+                      </span>
                     ))}
-                  </div>
-                  <Button variant="ghost" size="sm" className="mt-2 h-7 w-full text-xs">
+                  </span>
+                  <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover:text-primary dark:group-hover:text-brand-hi">
                     View details
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                    <Icon name="arrow-right" className="h-3 w-3" />
+                  </span>
+                </button>
+              ))}
+        </div>
       </div>
 
       <HealthTimeline window={window} />

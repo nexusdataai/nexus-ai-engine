@@ -1,6 +1,6 @@
-import { CalendarClock } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { Icon } from "@/components/ds/Icon";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -79,20 +79,19 @@ export function DateTimePicker({
   };
 
   return (
-    <div className={cn("flex flex-col gap-1", className)}>
-      <span className="text-xs text-muted-foreground">{label}</span>
+    <div className={cn("flex items-center", className)}>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
             type="button"
             variant="outline"
             className={cn(
-              "h-9 w-[220px] justify-start gap-2 px-3 font-normal",
-              !value && "text-muted-foreground",
-            )}
+              "h-8 justify-start gap-2 px-2.5 text-sm font-normal",
+              )}
           >
-            <CalendarClock className="h-4 w-4 shrink-0 opacity-70" />
-            <span className="truncate">{display || placeholder}</span>
+            <Icon name="calendar" className="text-subtle-foreground" />
+            <span className="text-muted-foreground">{label}</span>
+            {display ? <span className="truncate text-foreground">{display}</span> : <span className="sr-only">{placeholder}</span>}
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-auto p-0" align="start">
@@ -109,7 +108,7 @@ export function DateTimePicker({
                 aria-label={`${label} hour`}
                 value={draftHour}
                 onChange={(e) => setDraftHour(Number(e.target.value))}
-                className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+                className="field field-sm flex-1"
               >
                 {HOURS.map((hour) => (
                   <option key={hour} value={hour}>
@@ -122,7 +121,7 @@ export function DateTimePicker({
                 aria-label={`${label} minute`}
                 value={draftMinute}
                 onChange={(e) => setDraftMinute(Number(e.target.value))}
-                className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
+                className="field field-sm flex-1"
               >
                 {MINUTES.map((minute) => (
                   <option key={minute} value={minute}>

@@ -1,86 +1,281 @@
+/*
+ * Nexus AI Engine styles.
+ * Same design system as the Nexus AI ontology product and website:
+ * graphite surfaces, one blue accent, Geist type. Tokens live in
+ * styles/tokens.css; never hard-code a colour in a component.
+ */
+@import "./styles/tokens.css";
+@import "./styles/utils.css";
+@import "./styles/charts.css";
+
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./assets/fonts/geist-latin-wght-normal.woff2") format("woff2-variations");
+}
+@font-face {
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("./assets/fonts/geist-mono-latin-wght-normal.woff2") format("woff2-variations");
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-:root {
-  --background: 222 47% 7%;
-  --foreground: 210 40% 96%;
-  --card: 222 40% 10%;
-  --card-foreground: 210 40% 96%;
-  --popover: 222 40% 10%;
-  --popover-foreground: 210 40% 96%;
-  --primary: 262 83% 58%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 217 33% 17%;
-  --secondary-foreground: 210 40% 96%;
-  --muted: 217 33% 17%;
-  --muted-foreground: 215 20% 65%;
-  --accent: 217 33% 17%;
-  --accent-foreground: 210 40% 96%;
-  --destructive: 0 72% 51%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 217 33% 18%;
-  --input: 217 33% 18%;
-  --ring: 262 83% 58%;
-  --radius: 0.5rem;
-}
-
-html.light {
-  --background: 0 0% 98%;
-  --foreground: 222 47% 11%;
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --primary: 262 83% 58%;
-  --primary-foreground: 0 0% 100%;
-  --secondary: 214 32% 91%;
-  --secondary-foreground: 222 47% 11%;
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --accent: 214 32% 91%;
-  --accent-foreground: 222 47% 11%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 0% 100%;
-  --border: 214 32% 91%;
-  --input: 214 32% 91%;
-  --ring: 262 83% 58%;
-}
 
 @layer base {
   * {
     @apply border-border;
   }
+
+  html,
   body {
-    @apply bg-background text-foreground antialiased;
-    font-family:
-      "Segoe UI",
-      ui-sans-serif,
-      system-ui,
-      -apple-system,
-      Roboto,
-      "Helvetica Neue",
-      Arial,
-      sans-serif;
-    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow-x: hidden;
+  }
+
+  #root {
+    height: 100dvh;
+    width: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5 {
+    font-weight: 500;
+    letter-spacing: -0.02em;
+  }
+
+  code, kbd, pre, samp {
+    font-family: var(--font-mono);
+  }
+
+  ::selection {
+    background: hsl(var(--brand) / 0.32);
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 }
 
-/* react-day-picker — align with app theme */
+@layer components {
+  /* Page scaffolding ------------------------------------------------------ */
+  .page {
+    @apply mx-auto w-full max-w-[1440px] px-4 py-5 sm:px-6 sm:py-6 lg:px-8;
+  }
+
+  /* Full-height working area below the top bar (and a page bar). */
+  .h-pane {
+    height: calc(100dvh - var(--topbar-h) - var(--pagebar-h));
+    min-height: 460px;
+  }
+  .h-full-pane {
+    height: calc(100dvh - var(--topbar-h));
+    min-height: 460px;
+  }
+
+  .eyebrow {
+    @apply text-xs font-medium text-subtle-foreground;
+  }
+
+  /* Numbers: tabular figures so columns and counters do not jitter. */
+  .num {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .mono-id {
+    @apply font-mono text-xs text-muted-foreground;
+  }
+
+  /* Form controls --------------------------------------------------------- */
+  .field {
+    @apply h-9 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground transition-[border-color,box-shadow] duration-200 ease-brand placeholder:text-subtle-foreground hover:border-foreground/30 focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  select.field {
+    @apply cursor-pointer appearance-none pr-8;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239aa0ad' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.65rem center;
+  }
+  textarea.field {
+    @apply h-auto py-2;
+  }
+  .field-sm {
+    @apply h-8 text-sm;
+  }
+  .check {
+    @apply h-4 w-4 shrink-0 cursor-pointer rounded border-border-strong bg-card;
+    accent-color: hsl(var(--primary));
+  }
+
+  /* Tables ---------------------------------------------------------------- */
+  .tbl {
+    @apply w-full text-sm;
+  }
+  .tbl thead th {
+    @apply h-9 whitespace-nowrap border-b border-border bg-surface-2/60 px-4 text-left text-xs font-medium text-muted-foreground;
+  }
+  .tbl tbody td {
+    @apply border-b border-border px-4 py-2.5 align-middle;
+  }
+  .tbl tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .tbl tbody tr {
+    @apply transition-colors duration-150;
+  }
+  .tbl tbody tr:hover {
+    @apply bg-surface-2/50;
+  }
+  .tbl .r {
+    @apply text-right;
+  }
+
+  /* Links inside content */
+  .link {
+    @apply text-primary underline-offset-4 transition-colors hover:underline dark:text-brand-hi;
+  }
+
+  /* Dotted canvas background for diagrams, graphs and builders */
+  .canvas-dots {
+    background-color: hsl(var(--background));
+    background-image: radial-gradient(hsl(var(--border-strong)) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* Skeleton shimmer */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+    background: hsl(var(--surface-3));
+  }
+  .shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.06), transparent);
+    animation: shimmer 1.6s var(--ease) infinite;
+  }
+
+  /* Live status dot */
+  .dot-live {
+    position: relative;
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background: currentColor;
+  }
+  .dot-live::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 9999px;
+    border: 1px solid currentColor;
+    opacity: 0;
+    animation: ping-soft 2s var(--ease-out) infinite;
+  }
+
+  /* Animated connector line used in diagrams (SVG stroke) */
+  .flow-line {
+    stroke-dasharray: 4 8;
+    animation: flow 1.4s linear infinite;
+  }
+
+  /* Staggered entrance: set --i on each child */
+  .rise {
+    opacity: 0;
+    animation: fade-up var(--dur-slow) var(--ease-out) forwards;
+    animation-delay: calc(var(--i, 0) * 55ms);
+  }
+
+  /* Scrollbars ------------------------------------------------------------ */
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border-strong)) transparent;
+  }
+  .scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-strong));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* React Flow (execution graph) on design tokens --------------------------- */
+.react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-dots-color: hsl(var(--border-strong));
+  --xy-edge-stroke: hsl(var(--border-strong));
+  --xy-edge-stroke-selected: hsl(var(--brand));
+  --xy-connectionline-stroke: hsl(var(--brand));
+  --xy-handle-background-color: hsl(var(--brand));
+  --xy-handle-border-color: hsl(var(--card));
+  --xy-controls-button-background-color: hsl(var(--card));
+  --xy-controls-button-background-color-hover: hsl(var(--accent));
+  --xy-controls-button-color: hsl(var(--muted-foreground));
+  --xy-controls-button-color-hover: hsl(var(--foreground));
+  --xy-controls-button-border-color: hsl(var(--border));
+  --xy-controls-box-shadow: var(--shadow-sm);
+  --xy-minimap-background-color: hsl(var(--card));
+  --xy-minimap-mask-background-color: hsl(var(--background) / 0.6);
+  --xy-minimap-node-background-color: hsl(var(--surface-3));
+  --xy-attribution-background-color: transparent;
+  font-family: var(--font-sans);
+}
+.react-flow__controls,
+.react-flow__minimap {
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid hsl(var(--border));
+}
+.react-flow__attribution {
+  display: none;
+}
+
+/* react-day-picker on design tokens --------------------------------------- */
 .rdp {
   --rdp-cell-size: 2.25rem;
   --rdp-accent-color: hsl(var(--primary));
   --rdp-background-color: hsl(var(--accent));
   color: hsl(var(--foreground));
 }
-
 .rdp-day_selected,
 .rdp-day_selected:focus-visible,
 .rdp-day_selected:hover {
   background-color: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
 }
-
 .rdp-button:hover:not([disabled]):not(.rdp-day_selected) {
   background-color: hsl(var(--accent));
 }

@@ -1,24 +1,4 @@
-import {
-  Activity,
-  AppWindow,
-  Briefcase,
-  BookOpen,
-  Clock,
-  Database,
-  DollarSign,
-  HardDrive,
-  ListChecks,
-  Table2,
-  Warehouse,
-  Monitor,
-  Scale,
-  Server,
-  ServerCrash,
-  Shield,
-  Stethoscope,
-  Inbox,
-  type LucideIcon,
-} from "lucide-react";
+import type { IconName } from "@/components/ds/Icon";
 
 export type OperationsView = "monitoring" | "diagnostics" | "runbooks" | "ai-governance";
 export type MonitoringSection = "infra" | "app";
@@ -26,42 +6,42 @@ export type MonitoringSection = "infra" | "app";
 export interface OperationsTabDef {
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: IconName;
   view: OperationsView;
   section?: MonitoringSection;
 }
 
-export const OPERATIONS_VIEWS: { id: OperationsView; label: string; icon: LucideIcon }[] = [
-  { id: "monitoring", label: "Monitoring", icon: Monitor },
-  { id: "diagnostics", label: "Diagnostics", icon: Stethoscope },
-  { id: "runbooks", label: "Runbooks", icon: BookOpen },
-  { id: "ai-governance", label: "AI Governance", icon: Scale },
+export const OPERATIONS_VIEWS: { id: OperationsView; label: string; icon: IconName }[] = [
+  { id: "monitoring", label: "Monitoring", icon: "heartbeat" },
+  { id: "diagnostics", label: "Diagnostics", icon: "stethoscope" },
+  { id: "runbooks", label: "Runbooks", icon: "clipboard" },
+  { id: "ai-governance", label: "AI Governance", icon: "shield-check" },
 ];
 
-export const MONITORING_SECTIONS: { id: MonitoringSection; label: string; icon: LucideIcon }[] = [
-  { id: "app", label: "App", icon: AppWindow },
-  { id: "infra", label: "Infra", icon: Server },
+export const MONITORING_SECTIONS: { id: MonitoringSection; label: string; icon: IconName }[] = [
+  { id: "app", label: "App", icon: "apps" },
+  { id: "infra", label: "Infra", icon: "server" },
 ];
 
 export const DEFAULT_MONITORING_SECTION: MonitoringSection = "infra";
 export const DEFAULT_TAB_ID = "monitoring";
 
 export const OPERATIONS_TABS: OperationsTabDef[] = [
-  { id: "monitoring", label: "System SLAs", icon: Activity, view: "monitoring", section: "infra" },
-  { id: "resources", label: "Resource Monitoring", icon: HardDrive, view: "monitoring", section: "infra" },
-  { id: "redis-cache", label: "Redis Cache", icon: Database, view: "monitoring", section: "infra" },
-  { id: "dynamodb", label: "DynamoDB", icon: Table2, view: "monitoring", section: "infra" },
-  { id: "athena", label: "Athena Database", icon: Warehouse, view: "monitoring", section: "infra" },
-  { id: "cost", label: "Cost", icon: DollarSign, view: "monitoring", section: "infra" },
-  { id: "data-protection", label: "Data Protection", icon: Shield, view: "monitoring", section: "infra" },
-  { id: "executions", label: "Executions", icon: ListChecks, view: "monitoring", section: "app" },
-  { id: "queue", label: "Queue", icon: Briefcase, view: "monitoring", section: "app" },
-  { id: "schedules", label: "Schedules", icon: Clock, view: "monitoring", section: "app" },
-  { id: "infrastructure", label: "Infra", icon: Server, view: "diagnostics" },
-  { id: "diagnostics", label: "App", icon: Stethoscope, view: "diagnostics" },
-  { id: "stale-jobs", label: "Stale Job Manager", icon: Clock, view: "runbooks" },
-  { id: "dlq", label: "Dead Letter Queue", icon: Inbox, view: "runbooks" },
-  { id: "crash-analyzer", label: "Crash Analyzer", icon: ServerCrash, view: "runbooks" },
+  { id: "monitoring", label: "System SLAs", icon: "target", view: "monitoring", section: "infra" },
+  { id: "resources", label: "Resource Monitoring", icon: "chart-bar", view: "monitoring", section: "infra" },
+  { id: "redis-cache", label: "Redis Cache", icon: "bolt", view: "monitoring", section: "infra" },
+  { id: "dynamodb", label: "DynamoDB", icon: "table", view: "monitoring", section: "infra" },
+  { id: "athena", label: "Athena Database", icon: "database", view: "monitoring", section: "infra" },
+  { id: "cost", label: "Cost", icon: "trend-up", view: "monitoring", section: "infra" },
+  { id: "data-protection", label: "Data Protection", icon: "lock", view: "monitoring", section: "infra" },
+  { id: "executions", label: "Executions", icon: "play", view: "monitoring", section: "app" },
+  { id: "queue", label: "Queue", icon: "layers", view: "monitoring", section: "app" },
+  { id: "schedules", label: "Schedules", icon: "calendar", view: "monitoring", section: "app" },
+  { id: "infrastructure", label: "Infra", icon: "server", view: "diagnostics" },
+  { id: "diagnostics", label: "App", icon: "apps", view: "diagnostics" },
+  { id: "stale-jobs", label: "Stale Job Manager", icon: "clock", view: "runbooks" },
+  { id: "dlq", label: "Dead Letter Queue", icon: "box", view: "runbooks" },
+  { id: "crash-analyzer", label: "Crash Analyzer", icon: "alert-triangle", view: "runbooks" },
 ];
 
 const VIEW_IDS = new Set<OperationsView>(OPERATIONS_VIEWS.map((v) => v.id));

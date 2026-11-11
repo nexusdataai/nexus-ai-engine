@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Table2 } from "lucide-react";
 import {
   CartesianGrid,
   ComposedChart,
-  Legend,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -12,17 +10,27 @@ import {
   YAxis,
 } from "recharts";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  CHART_MARGIN,
+  ChartLegend,
+  ChartTooltip,
+  axisProps,
+  cursorLine,
+  gridProps,
+  lineProps,
+  seriesColor,
+} from "@/components/ds/charts";
+import { EmptyState, MetricStrip, Panel, Segmented, SkeletonRows, StatusPill, type ChipOption, type Metric } from "@/components/ds/kit";
 import { api } from "@/services/api";
 import type { DataStoreKpi, DataStoreWindow } from "@/types/dataStores";
 
-const KPI_TINT: Record<string, string> = {
-  read_rcu: "border-l-sky-500",
-  write_wcu: "border-l-amber-400",
-  read_latency: "border-l-violet-500",
-  write_latency: "border-l-green-500",
-};
+import { ChartBody, ConnectionPill, MetricStripSkeleton, RefreshButton, SectionHeader, stripColumns } from "./parts";
+
+const WINDOWS: ChipOption<DataStoreWindow>[] = [
+  { value: "1h", label: "Last 1h" },
+  { value: "24h", label: "Last 24h" },
+  { value: "7d", label: "Last 7 days" },
+];
 
 function formatKpi(kpi: DataStoreKpi): string {
   if (kpi.value == null) return "—";
@@ -39,6 +47,8 @@ function formatTick(iso: string, grain?: string): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
+const NA = <span className="text-subtle-foreground">n/a</span>;
+
 export function DynamoDbSection() {
   const [window, setWindow] = useState<DataStoreWindow>("1h");
   const qc = useQueryClient();
@@ -54,216 +64,175 @@ export function DynamoDbSection() {
   }));
   const hasCapacity = points.some((p) => p.read_rcu != null || p.write_wcu != null);
   const hasLatency = points.some((p) => p.read_latency_ms != null || p.write_latency_ms != null);
+  const timeOf = (idx: unknown) => points[Number(idx)]?.time ?? "";
+  const tables = data?.tables ?? [];
+
+  const summary: Metric[] = [
+    { label: "Region", value: data?.region || "—" },
+    { label: "Tables", value: `${data?.tables_active ?? 0} / ${data?.table_total ?? 0} active` },
+    ...(data?.kpis ?? []).map((kpi) => ({ label: kpi.label, value: formatKpi(kpi) })),
+  ];
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Table2 className="h-5 w-5" />
-            DynamoDB
-          </CardTitle>
-          <CardDescription>
-            Journey, execution, prompt, and SLA snapshot tables used by this ai-engine. Capacity and
-            latency come from CloudWatch when published; otherwise a Limit=1 read probe is used.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              className="h-8 rounded-md border bg-background px-2 text-xs"
-              value={window}
-              onChange={(e) => setWindow(e.target.value as DataStoreWindow)}
-              aria-label="DynamoDB window"
-            >
-              <option value="1h">Last 1h</option>
-              <option value="24h">Last 24h</option>
-              <option value="7d">Last 7 days</option>
-            </select>
-            <Button
-              size="sm"
-              onClick={() => qc.invalidateQueries({ queryKey: ["dynamodb-monitoring", window] })}
+    <div className="space-y-6">
+      <SectionHeader
+        title="DynamoDB"
+        description="Journey, execution, prompt, and SLA snapshot tables used by this ai-engine. Capacity and latency come from CloudWatch when published; otherwise a Limit=1 read probe is used."
+        meta={
+          <>
+            <ConnectionPill loading={isLoading} connected={data?.connected} />
+            {data?.ping_ms != null && <span className="num text-sm text-muted-foreground">{data.ping_ms} ms</span>}
+          </>
+        }
+        actions={
+          <>
+            <Segmented options={WINDOWS} value={window} onChange={setWindow} label="DynamoDB window" />
+            <RefreshButton
+              spinning={isFetching}
               disabled={isLoading}
+              onClick={() => qc.invalidateQueries({ queryKey: ["dynamodb-monitoring", window] })}
             >
-              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
               Refresh Status
-            </Button>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                data?.connected ? "bg-emerald-600/20 text-emerald-400" : "bg-red-600/20 text-red-400"
-              }`}
-            >
-              {isLoading ? "checking" : data?.connected ? "connected" : "disconnected"}
-            </span>
-            {data?.ping_ms != null && <span className="text-sm text-muted-foreground">{data.ping_ms} ms</span>}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Region</div>
-              <div className="font-medium">{data?.region || "—"}</div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Tables</div>
-              <div className="font-medium">
-                {data?.tables_active ?? 0} / {data?.table_total ?? 0} active
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </RefreshButton>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {(isLoading ? Array.from({ length: 4 }).map((_, i) => ({ id: String(i) }) as DataStoreKpi) : data?.kpis ?? []).map(
-          (kpi) => (
-            <Card key={kpi.id} className={`border-l-4 ${KPI_TINT[kpi.id] ?? "border-l-primary"}`}>
-              <CardContent className="p-4">
-                {isLoading ? (
-                  <div className="h-12 animate-pulse rounded bg-muted" />
-                ) : (
-                  <>
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{kpi.label}</div>
-                    <div className="mt-1 text-2xl font-bold">{formatKpi(kpi)}</div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          ),
-        )}
+      {isLoading ? <MetricStripSkeleton count={6} /> : <MetricStrip items={summary} columns={stripColumns(summary.length)} />}
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Panel title="Read / write capacity">
+          <ChartBody
+            loading={isLoading}
+            empty={!hasCapacity && "No consumed capacity yet. CloudWatch RCU/WCU appears after table reads and writes."}
+          >
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={points} margin={CHART_MARGIN}>
+                <CartesianGrid {...gridProps} />
+                <XAxis
+                  dataKey="idx"
+                  type="number"
+                  domain={["dataMin", "dataMax"]}
+                  tickFormatter={timeOf}
+                  {...axisProps}
+                  interval="preserveStartEnd"
+                  minTickGap={28}
+                />
+                <YAxis {...axisProps} width={48} />
+                <Tooltip
+                  cursor={cursorLine}
+                  content={
+                    <ChartTooltip
+                      labelFormatter={timeOf}
+                      valueFormatter={(value) => (value != null ? Number(value).toFixed(2) : "—")}
+                    />
+                  }
+                />
+                <Line dataKey="read_rcu" name="Read RCU" stroke={seriesColor(0)} {...lineProps} connectNulls />
+                <Line dataKey="write_wcu" name="Write WCU" stroke={seriesColor(1)} {...lineProps} connectNulls />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <ChartLegend
+              className="mt-3"
+              items={[
+                { label: "Read RCU", color: seriesColor(0) },
+                { label: "Write WCU", color: seriesColor(1) },
+              ]}
+            />
+          </ChartBody>
+        </Panel>
+
+        <Panel title="Read / write latency">
+          <ChartBody
+            loading={isLoading}
+            empty={!hasLatency && "No latency samples yet. A read probe runs on refresh; write latency needs CloudWatch PutItem metrics."}
+          >
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={points} margin={CHART_MARGIN}>
+                <CartesianGrid {...gridProps} />
+                <XAxis
+                  dataKey="idx"
+                  type="number"
+                  domain={["dataMin", "dataMax"]}
+                  tickFormatter={timeOf}
+                  {...axisProps}
+                  interval="preserveStartEnd"
+                  minTickGap={28}
+                />
+                <YAxis {...axisProps} width={44} tickFormatter={(v) => `${v}`} />
+                <Tooltip
+                  cursor={cursorLine}
+                  content={
+                    <ChartTooltip
+                      labelFormatter={timeOf}
+                      valueFormatter={(value) => (value != null ? `${Number(value).toFixed(1)} ms` : "—")}
+                    />
+                  }
+                />
+                <Line dataKey="read_latency_ms" name="Read" stroke={seriesColor(0)} {...lineProps} connectNulls />
+                <Line dataKey="write_latency_ms" name="Write" stroke={seriesColor(1)} {...lineProps} connectNulls />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <ChartLegend
+              className="mt-3"
+              items={[
+                { label: "Read", color: seriesColor(0) },
+                { label: "Write", color: seriesColor(1) },
+              ]}
+            />
+          </ChartBody>
+        </Panel>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Read / write capacity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
-          ) : !hasCapacity ? (
-            <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">
-              No consumed capacity yet. CloudWatch RCU/WCU appears after table reads and writes.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={points}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis
-                  dataKey="idx"
-                  type="number"
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(idx) => points[Number(idx)]?.time ?? ""}
-                  tick={{ fontSize: 10 }}
-                  interval="preserveStartEnd"
-                  minTickGap={28}
-                />
-                <YAxis tick={{ fontSize: 10 }} width={48} />
-                <Tooltip
-                  content={({ payload }) => {
-                    if (!payload?.length) return null;
-                    const time = (payload[0].payload as { time?: string })?.time;
-                    return (
-                      <div className="bg-background border rounded p-2 text-xs shadow space-y-1">
-                        <div className="font-medium">{time}</div>
-                        {payload.map((item) => (
-                          <div key={String(item.dataKey)} style={{ color: String(item.color) }}>
-                            {item.name}: {item.value != null ? Number(item.value).toFixed(2) : "—"}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="read_rcu" name="Read RCU" stroke="#38bdf8" strokeWidth={2} dot={false} connectNulls />
-                <Line type="monotone" dataKey="write_wcu" name="Write WCU" stroke="#eab308" strokeWidth={2} dot={false} connectNulls />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Read / write latency</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
-          ) : !hasLatency ? (
-            <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">
-              No latency samples yet. A read probe runs on refresh; write latency needs CloudWatch PutItem metrics.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={points}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis
-                  dataKey="idx"
-                  type="number"
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(idx) => points[Number(idx)]?.time ?? ""}
-                  tick={{ fontSize: 10 }}
-                  interval="preserveStartEnd"
-                  minTickGap={28}
-                />
-                <YAxis tick={{ fontSize: 10 }} width={44} tickFormatter={(v) => `${v}`} />
-                <Tooltip
-                  content={({ payload }) => {
-                    if (!payload?.length) return null;
-                    const time = (payload[0].payload as { time?: string })?.time;
-                    return (
-                      <div className="bg-background border rounded p-2 text-xs shadow space-y-1">
-                        <div className="font-medium">{time}</div>
-                        {payload.map((item) => (
-                          <div key={String(item.dataKey)} style={{ color: String(item.color) }}>
-                            {item.name}: {item.value != null ? `${Number(item.value).toFixed(1)} ms` : "—"}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="read_latency_ms" name="Read" stroke="#8b5cf6" strokeWidth={2} dot={false} connectNulls />
-                <Line type="monotone" dataKey="write_latency_ms" name="Write" stroke="#22c55e" strokeWidth={2} dot={false} connectNulls />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Engine tables</CardTitle>
-          <CardDescription>DescribeTable status plus latest consumed capacity when CloudWatch has it.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm border rounded-lg divide-y">
-            {(data?.tables ?? []).map((row) => (
-              <div key={row.id} className="px-3 py-2 space-y-1">
-                <div className="flex justify-between gap-3">
-                  <span className="font-medium">{row.label}</span>
-                  <span className="text-muted-foreground">{row.status || "—"}</span>
-                </div>
-                <div className="font-mono text-xs break-all text-muted-foreground">{row.name || "not configured"}</div>
-                <div className="text-xs text-muted-foreground">
-                  {row.item_count != null ? `${row.item_count} items` : "item count n/a"}
-                  {row.size_human ? ` · ${row.size_human}` : ""}
-                  {row.gsi_count != null ? ` · ${row.gsi_count} GSI` : ""}
-                  {row.billing_mode ? ` · ${row.billing_mode}` : ""}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  read {row.read_rcu != null ? `${Number(row.read_rcu).toFixed(2)} RCU` : "n/a"}
-                  {" · "}
-                  write {row.write_wcu != null ? `${Number(row.write_wcu).toFixed(2)} WCU` : "n/a"}
-                  {row.read_latency_ms != null ? ` · read ${Number(row.read_latency_ms).toFixed(1)} ms` : ""}
-                  {row.write_latency_ms != null ? ` · write ${Number(row.write_latency_ms).toFixed(1)} ms` : ""}
-                </div>
-              </div>
-            ))}
-            {isLoading ? <div className="px-3 py-4 text-muted-foreground">Loading tables…</div> : null}
+      <Panel
+        title="Engine tables"
+        flush
+        footer="DescribeTable status plus latest consumed capacity when CloudWatch has it."
+      >
+        {isLoading ? (
+          <SkeletonRows rows={4} />
+        ) : tables.length === 0 ? (
+          <EmptyState bare icon="table" title="No engine tables" />
+        ) : (
+          <div className="scroll-thin overflow-x-auto">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Table</th>
+                  <th>Status</th>
+                  <th className="r">Items</th>
+                  <th className="r">Size</th>
+                  <th className="r">GSI</th>
+                  <th>Billing</th>
+                  <th className="r">Read RCU</th>
+                  <th className="r">Write WCU</th>
+                  <th className="r">Read ms</th>
+                  <th className="r">Write ms</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tables.map((row) => (
+                  <tr key={row.id}>
+                    <td className="min-w-[220px]">
+                      <span className="block font-medium text-foreground">{row.label}</span>
+                      <span className="block break-all font-mono text-xs text-muted-foreground">{row.name || "not configured"}</span>
+                    </td>
+                    <td>{row.status ? <StatusPill status={row.status} /> : "—"}</td>
+                    <td className="r num">{row.item_count != null ? row.item_count : NA}</td>
+                    <td className="r num whitespace-nowrap">{row.size_human || "—"}</td>
+                    <td className="r num">{row.gsi_count != null ? row.gsi_count : "—"}</td>
+                    <td className="whitespace-nowrap text-muted-foreground">{row.billing_mode || "—"}</td>
+                    <td className="r num">{row.read_rcu != null ? Number(row.read_rcu).toFixed(2) : NA}</td>
+                    <td className="r num">{row.write_wcu != null ? Number(row.write_wcu).toFixed(2) : NA}</td>
+                    <td className="r num">{row.read_latency_ms != null ? Number(row.read_latency_ms).toFixed(1) : "—"}</td>
+                    <td className="r num">{row.write_latency_ms != null ? Number(row.write_latency_ms).toFixed(1) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </CardContent>
-      </Card>
+        )}
+      </Panel>
     </div>
   );
 }

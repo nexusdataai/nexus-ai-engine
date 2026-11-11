@@ -1,16 +1,20 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Activity, AlertTriangle, Clock, PlayCircle, Server, Users } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
-import { EmptyState } from "@/components/EmptyState";
-import { StatusBadge } from "@/components/StatusBadge";
+import { EngineFlow } from "@/components/dashboard/EngineFlow";
+import { CHART_MARGIN, ChartLegend, ChartTooltip, STATUS_COLORS, axisProps, barProps, cursorBand, gridProps, seriesColor } from "@/components/ds/charts";
+import { EmptyState, PageHeader, Panel, SkeletonRows, StatusPill } from "@/components/ds/kit";
 import { WorkerHealthCardLink, WorkerHealthList } from "@/components/workers/WorkerHealthList";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWorkersSnapshot } from "@/hooks/useQueueSnapshot";
 import { api } from "@/services/api";
 import { truncateId } from "@/lib/utils";
+import { relativeTime } from "@/utils/time";
 import type { UnifiedRunRow } from "@/types/stageJourney";
+
+const OK = ["completed", "succeeded", "success"];
+const BAD = ["failed", "error"];
 
 function throughputFromRuns(runs: UnifiedRunRow[], hours = 24) {
   const cutoff = Date.now() - hours * 60 * 60 * 1000;
@@ -26,10 +30,36 @@ function throughputFromRuns(runs: UnifiedRunRow[], hours = 24) {
     }
     submitted += 1;
     const status = run.status.toLowerCase();
-    if (["completed", "succeeded", "success"].includes(status)) succeeded += 1;
-    else if (["failed", "error"].includes(status)) failed += 1;
+    if (OK.includes(status)) succeeded += 1;
+    else if (BAD.includes(status)) failed += 1;
   }
   return { submitted, succeeded, failed };
+}
+
+/** Runs per hour for the last 24 hours, oldest first. */
+function hourlyFromRuns(runs: UnifiedRunRow[]) {
+  const now = new Date();
+  now.setMinutes(0, 0, 0);
+  const buckets = Array.from({ length: 24 }, (_, i) => {
+    const start = now.getTime() - (23 - i) * 3_600_000;
+    return { start, hour: new Date(start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }), succeeded: 0, failed: 0, other: 0 };
+  });
+  for (const run of runs) {
+    if (run.kind !== "stage_job" || !run.startedAt) continue;
+    const ts = Date.parse(run.startedAt);
+    if (!Number.isFinite(ts)) continue;
+    const idx = Math.floor((ts - buckets[0].start) / 3_600_000);
+    if (idx < 0 || idx > 23) continue;
+    const status = run.status.toLowerCase();
+    if (OK.includes(status)) buckets[idx].succeeded += 1;
+    else if (BAD.includes(status)) buckets[idx].failed += 1;
+    else buckets[idx].other += 1;
+  }
+  return buckets;
+}
+
+function runHref(run: UnifiedRunRow) {
+  return run.kind === "stage_job" ? `/executions/stage/${run.journeyId}/${run.id}` : `/executions/${run.id}`;
 }
 
 export function DashboardPage() {
@@ -61,243 +91,222 @@ export function DashboardPage() {
   });
 
   const summary = fleet.data;
-  const runThroughput = useMemo(
-    () => throughputFromRuns(recentRuns.data ?? []),
-    [recentRuns.data],
-  );
+  const runThroughput = useMemo(() => throughputFromRuns(recentRuns.data ?? []), [recentRuns.data]);
   const throughput =
     runThroughput.submitted > 0 || runThroughput.failed > 0 || runThroughput.succeeded > 0
       ? runThroughput
       : metrics.data?.throughput;
+  const hourly = useMemo(() => {
+    const fromApi = metrics.data?.timeline ?? [];
+    if (fromApi.length > 0) {
+      return fromApi.map((t) => ({
+        hour: new Date(t.hour).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        succeeded: t.succeeded,
+        failed: t.failed,
+        other: 0,
+      }));
+    }
+    return hourlyFromRuns(recentRuns.data ?? []);
+  }, [metrics.data?.timeline, recentRuns.data]);
+  const hasHourly = hourly.some((h) => h.succeeded + h.failed + h.other > 0);
+
   const p95 = metrics.data?.tool_dispatch_p95_ms;
   const journeyRows = journeys.data ?? [];
   const journeyJobTotal = journeyRows.reduce((n, j) => n + Number(j.totalJobs ?? 0), 0);
   const recent = (recentRuns.data ?? []).slice(0, 8);
   const stageActive = summary?.stage_jobs_active ?? 0;
   const stageQueued = summary?.stage_jobs_queued ?? 0;
+  const dslActive = summary?.dsl_executions_active ?? 0;
+  const dslQueued = summary?.dsl_executions_queued ?? 0;
   const jobWorkerRows = queueWorkers.workers.data?.workers ?? [];
   const jobWorkerCount = jobWorkerRows.length;
+  const desired = queueWorkers.summary.data?.replicas;
+  const failedNow = summary?.failed ?? 0;
+  const throughputReady = !recentRuns.isLoading;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Dashboard</h2>
-        <p className="text-sm text-muted-foreground">
-          Fleet health, journey activity, and recent executions in one view.
-        </p>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        description="Fleet health, journey activity, and recent executions in one view."
+        meta={
+          failedNow > 0 ? (
+            <StatusPill tone="danger" variant="soft">{failedNow} failed</StatusPill>
+          ) : fleet.isLoading ? null : (
+            <StatusPill tone="success" variant="soft">No failed jobs</StatusPill>
+          )
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Journeys</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{journeys.isLoading ? "…" : journeyRows.length}</p>
-            <p className="text-xs text-muted-foreground mt-1">{journeyJobTotal} total stage jobs</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <PlayCircle className="h-4 w-4 text-blue-400" />
-              Active executions
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold" data-testid="active-execution-count">
-              {fleet.isLoading ? "…" : (summary?.active ?? 0)}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Limit {summary?.global_limit ?? "—"}
-              {summary?.running_counter != null ? ` · counter ${summary.running_counter}` : ""}
-              {stageActive > 0 || (summary?.dsl_executions_active ?? 0) > 0
-                ? ` · ${stageActive} stage · ${summary?.dsl_executions_active ?? 0} DSL`
-                : ""}
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Clock className="h-4 w-4 text-amber-400" />
-              Queued
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold" data-testid="queued-execution-count">
-              {fleet.isLoading ? "…" : (summary?.queued ?? 0)}
-            </p>
-            {(stageQueued > 0 || (summary?.dsl_executions_queued ?? 0) > 0) && (
-              <p className="text-xs text-muted-foreground mt-1">
-                {stageQueued} stage · {summary?.dsl_executions_queued ?? 0} DSL
-              </p>
-            )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-red-400" />
-              Failed
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold">{fleet.isLoading ? "…" : (summary?.failed ?? 0)}</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Users className="h-4 w-4 text-emerald-400" />
-              Workers
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-3xl font-bold" data-testid="job-worker-count">
-              {queueWorkers.workers.isLoading ? "…" : jobWorkerCount}
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              job-worker pods
-              {queueWorkers.summary.data?.replicas != null
-                ? ` · ${queueWorkers.summary.data.replicas} desired`
-                : ""}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+      <EngineFlow
+        journeys={journeys.isLoading ? "…" : journeyRows.length}
+        journeyJobs={`${journeyJobTotal.toLocaleString()} total stage jobs`}
+        queued={<span data-testid="queued-execution-count">{fleet.isLoading ? "…" : (summary?.queued ?? 0)}</span>}
+        queuedNumber={summary?.queued ?? 0}
+        queueHint={stageQueued > 0 || dslQueued > 0 ? `${stageQueued} stage · ${dslQueued} DSL waiting` : "Nothing waiting"}
+        active={<span data-testid="active-execution-count">{fleet.isLoading ? "…" : (summary?.active ?? 0)}</span>}
+        activeNumber={summary?.active ?? 0}
+        limit={summary?.global_limit}
+        workersHint={
+          <>
+            Limit {summary?.global_limit ?? "—"}
+            {summary?.running_counter != null ? ` · counter ${summary.running_counter}` : ""}
+            {stageActive > 0 || dslActive > 0 ? ` · ${stageActive} stage · ${dslActive} DSL` : ""}
+            {" · "}
+            <span data-testid="job-worker-count">{queueWorkers.workers.isLoading ? "…" : jobWorkerCount}</span> job-worker pods
+            {desired != null ? ` · ${desired} desired` : ""}
+          </>
+        }
+        succeeded={throughput?.succeeded ?? 0}
+        failed={throughput?.failed ?? 0}
+        resultsReady={throughputReady}
+      />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className="h-4 w-4" />
-              24h throughput
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {metrics.isLoading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : (
-              <dl className="grid grid-cols-3 gap-4 text-center">
-                <div>
-                  <dt className="text-xs text-muted-foreground">Submitted</dt>
-                  <dd className="text-2xl font-semibold">{throughput?.submitted ?? 0}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted-foreground">Succeeded</dt>
-                  <dd className="text-2xl font-semibold text-emerald-400">{throughput?.succeeded ?? 0}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted-foreground">Failed</dt>
-                  <dd className="text-2xl font-semibold text-red-400">{throughput?.failed ?? 0}</dd>
-                </div>
-              </dl>
-            )}
-            <p className="text-sm text-muted-foreground mt-4" data-testid="tool-dispatch-p95">
-              Tool dispatch p95:{" "}
-              {p95 != null ? `${p95.toFixed(1)} ms` : metrics.isLoading ? "…" : "n/a"}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Server className="h-4 w-4" />
-                Worker health
-              </CardTitle>
-              <WorkerHealthCardLink />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <WorkerHealthList
-              workers={jobWorkerRows.map((w) => ({
-                worker_id: w.worker_id,
-                role: "job-worker",
-                status: w.status,
-                last_seen: w.last_seen,
-              }))}
-              loading={queueWorkers.workers.isLoading}
-              emptyTitle="No job workers"
-              emptyDescription="Job-worker pods and Redis consumers appear here."
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Panel
+          title="24h throughput"
+          description="Stage jobs started per hour, by outcome."
+          actions={
+            <ChartLegend
+              items={[
+                { label: "Succeeded", color: seriesColor(0), value: (throughput?.succeeded ?? 0).toLocaleString() },
+                { label: "Failed", color: STATUS_COLORS.danger, value: (throughput?.failed ?? 0).toLocaleString() },
+                { label: "Submitted", color: STATUS_COLORS.neutral, value: (throughput?.submitted ?? 0).toLocaleString() },
+              ]}
             />
-          </CardContent>
-        </Card>
+          }
+          footer={
+            <span data-testid="tool-dispatch-p95">
+              Tool dispatch p95:{" "}
+              <span className="num font-medium text-foreground">
+                {p95 != null ? `${p95.toFixed(1)} ms` : metrics.isLoading ? "…" : "n/a"}
+              </span>
+            </span>
+          }
+        >
+          {!throughputReady ? (
+            <SkeletonRows rows={5} className="p-0" />
+          ) : !hasHourly ? (
+            <EmptyState bare icon="chart-bar" title="No runs in the last 24 hours" description="Hourly throughput appears here once jobs start." className="py-8" />
+          ) : (
+            <div className="h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={hourly} margin={CHART_MARGIN}>
+                  <CartesianGrid {...gridProps} />
+                  <XAxis dataKey="hour" {...axisProps} interval={3} />
+                  <YAxis {...axisProps} width={36} allowDecimals={false} />
+                  <Tooltip content={<ChartTooltip />} cursor={cursorBand} />
+                  <Bar dataKey="succeeded" name="Succeeded" stackId="runs" fill={seriesColor(0)} {...barProps} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="other" name="In progress" stackId="runs" fill={STATUS_COLORS.neutral} {...barProps} radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="failed" name="Failed" stackId="runs" fill={STATUS_COLORS.danger} {...barProps} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Worker health" actions={<WorkerHealthCardLink />} flush>
+          <WorkerHealthList
+            workers={jobWorkerRows.map((w) => ({
+              worker_id: w.worker_id,
+              role: "job-worker",
+              status: w.status,
+              last_seen: w.last_seen,
+            }))}
+            loading={queueWorkers.workers.isLoading}
+            emptyTitle="No job workers"
+            emptyDescription="Job-worker pods and Redis consumers appear here."
+          />
+        </Panel>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-base">Recent runs</CardTitle>
-            <Link to="/executions" className="text-sm text-primary hover:underline">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Panel
+          title="Recent runs"
+          flush
+          actions={
+            <Link to="/executions" className="link text-sm">
               View all
             </Link>
-          </div>
-        </CardHeader>
-        <CardContent>
+          }
+        >
           {recentRuns.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <SkeletonRows rows={6} />
           ) : recent.length === 0 ? (
             <EmptyState
+              bare
+              icon="play"
               title="No runs yet"
               description="Start a stage job from Journeys or submit a DSL execution."
               action={
-                <Link to="/journeys" className="text-sm text-primary hover:underline">
+                <Link to="/journeys" className="link">
                   Open journeys
                 </Link>
               }
             />
           ) : (
-            <ul className="divide-y divide-border">
-              {recent.map((run) => (
-                <li key={`${run.kind}-${run.id}`} className="py-2 flex items-center justify-between gap-2">
-                  <Link
-                    to={
-                      run.kind === "stage_job"
-                        ? `/executions/stage/${run.journeyId}/${run.id}`
-                        : `/executions/${run.id}`
-                    }
-                    className="text-sm text-primary hover:underline font-mono"
-                  >
-                    {truncateId(run.id, 14)}
-                  </Link>
-                  <span className="text-sm text-muted-foreground truncate">
-                    {run.kind === "stage_job" ? run.journeyName ?? run.journeyId : run.journeyId}
-                  </span>
-                  <StatusBadge status={run.status} />
-                </li>
-              ))}
-            </ul>
+            <div className="scroll-thin overflow-x-auto">
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Journey</th>
+                    <th>Run</th>
+                    <th>Started</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recent.map((run) => (
+                    <tr key={`${run.kind}-${run.journeyId}-${run.id}`}>
+                      <td className="max-w-[320px]">
+                        <Link to={runHref(run)} className="block truncate font-medium text-foreground hover:text-primary dark:hover:text-brand-hi">
+                          {run.kind === "stage_job" ? run.journeyName ?? run.journeyId : run.journeyId}
+                        </Link>
+                        <span className="text-xs text-muted-foreground">
+                          {run.kind === "stage_job" ? (run.jobType === "journey" ? "Full journey" : run.stageId ? `Stage ${run.stageId}` : "Stage job") : "DSL execution"}
+                        </span>
+                      </td>
+                      <td>
+                        <Link to={runHref(run)} className="mono-id hover:text-foreground" title={run.id}>
+                          {truncateId(run.id, 14)}
+                        </Link>
+                      </td>
+                      <td className="whitespace-nowrap text-muted-foreground">
+                        {run.kind === "stage_job" && run.startedAt ? relativeTime(run.startedAt) : "—"}
+                      </td>
+                      <td>
+                        <StatusPill status={run.status} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">DSL executions running</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <Panel title="DSL executions running" flush>
           {running.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <SkeletonRows rows={3} />
           ) : (running.data?.length ?? 0) === 0 ? (
-            <EmptyState title="No active DSL executions" description="DSL runs appear here when submitted from the YAML studio." />
+            <EmptyState bare title="No active DSL executions" description="DSL runs appear here when submitted from the YAML studio." />
           ) : (
             <ul className="divide-y divide-border">
               {running.data!.map((ex) => (
-                <li key={ex.execution_id} className="py-2 flex items-center justify-between gap-2">
-                  <Link to={`/executions/${ex.execution_id}`} className="text-sm text-primary hover:underline">
-                    {truncateId(ex.execution_id)}
-                  </Link>
-                  <span className="text-sm text-muted-foreground">{ex.journey_id}</span>
-                  <StatusBadge status={ex.status} />
+                <li key={ex.execution_id} className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
+                  <div className="min-w-0">
+                    <Link to={`/executions/${ex.execution_id}`} className="block truncate font-mono text-sm text-foreground hover:text-primary dark:hover:text-brand-hi">
+                      {truncateId(ex.execution_id)}
+                    </Link>
+                    <span className="block truncate text-xs text-muted-foreground">{ex.journey_id}</span>
+                  </div>
+                  <StatusPill status={ex.status} />
                 </li>
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
+        </Panel>
+      </div>
     </div>
   );
 }

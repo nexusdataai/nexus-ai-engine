@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 
-import { cn } from "@/lib/utils";
+import { SkeletonRows, StatusPill, type Tone } from "@/components/ds/kit";
+import { relativeTime } from "@/utils/time";
 import type { FleetWorker } from "@/types/api";
 
 type Props = {
@@ -10,23 +11,11 @@ type Props = {
   emptyDescription?: string;
 };
 
-const HEALTH: Record<string, { label: string; className: string }> = {
-  healthy: {
-    label: "Healthy",
-    className: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-  },
-  idle: {
-    label: "Idle",
-    className: "bg-muted text-muted-foreground border-border",
-  },
-  stale: {
-    label: "Stale",
-    className: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-  },
-  offline: {
-    label: "Offline",
-    className: "bg-red-500/15 text-red-300 border-red-500/30",
-  },
+const HEALTH: Record<string, { label: string; tone: Tone }> = {
+  healthy: { label: "Healthy", tone: "success" },
+  idle: { label: "Idle", tone: "neutral" },
+  stale: { label: "Stale", tone: "warning" },
+  offline: { label: "Offline", tone: "danger" },
 };
 
 function healthKey(status: string): keyof typeof HEALTH {
@@ -38,6 +27,12 @@ function healthKey(status: string): keyof typeof HEALTH {
   return "idle";
 }
 
+/** Pod names share a long deployment prefix; show the part that differs. */
+export function shortWorkerName(id: string): string {
+  const parts = id.split("-");
+  return parts.length > 2 ? parts.slice(-2).join("-") : id;
+}
+
 export function WorkerHealthList({
   workers,
   loading,
@@ -45,11 +40,11 @@ export function WorkerHealthList({
   emptyDescription = "Worker registry is empty.",
 }: Props) {
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading…</p>;
+    return <SkeletonRows rows={3} />;
   }
   if (workers.length === 0) {
     return (
-      <p className="text-sm text-muted-foreground">
+      <p className="px-4 py-6 text-sm text-muted-foreground sm:px-5">
         {emptyTitle} — {emptyDescription}
       </p>
     );
@@ -59,17 +54,16 @@ export function WorkerHealthList({
       {workers.map((w) => {
         const health = HEALTH[healthKey(w.status)];
         return (
-          <li key={`${w.worker_id}-${w.role}`} className="py-2 flex items-center justify-between gap-2">
-            <span className="text-sm font-mono truncate">{w.worker_id}</span>
-            <span className="text-xs text-muted-foreground">{w.role}</span>
-            <span
-              className={cn(
-                "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
-                health.className,
-              )}
-            >
-              {health.label}
-            </span>
+          <li key={`${w.worker_id}-${w.role}`} className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-5">
+            <div className="min-w-0">
+              <div className="truncate font-mono text-sm text-foreground" title={w.worker_id}>
+                {shortWorkerName(w.worker_id)}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {w.role} · seen {relativeTime(w.last_seen)}
+              </div>
+            </div>
+            <StatusPill tone={health.tone}>{health.label}</StatusPill>
           </li>
         );
       })}
@@ -79,7 +73,7 @@ export function WorkerHealthList({
 
 export function WorkerHealthCardLink() {
   return (
-    <Link to="/workers" className="text-sm text-primary hover:underline">
+    <Link to="/workers" className="link text-sm">
       Manage workers
     </Link>
   );

@@ -1,12 +1,11 @@
 import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { LayoutGrid, List, Loader2, Play, Plus, Square } from "lucide-react";
 
-import { EmptyState } from "@/components/EmptyState";
-import { StatusBadge } from "@/components/StatusBadge";
+import { Icon } from "@/components/ds/Icon";
+import { Chips, EmptyState, InlineError, Notice, PageHeader, SearchInput, Segmented, SkeletonRows, StatusPill, TableShell, Toolbar, ToolbarSpacer } from "@/components/ds/kit";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { journeyListStats } from "@/lib/stageJourney";
 import { api } from "@/services/api";
 import type { DslJourneySummary, QueueJob, QueueSummary, SimpleJourneySummary } from "@/types/api";
@@ -59,7 +58,7 @@ function markJourneyIdle(journeyId: string) {
 }
 
 function JourneyGrid({ children }: { children: React.ReactNode }) {
-  return <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{children}</div>;
+  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{children}</div>;
 }
 
 type JourneyLive = {
@@ -101,6 +100,34 @@ function journeyLive(
   };
 }
 
+/** Share of finished jobs that succeeded, as one thin bar plus a sentence. */
+function OutcomeBar({ live }: { live: JourneyLive }) {
+  const finished = live.done + live.failed;
+  const okPct = finished > 0 ? (live.done / finished) * 100 : 0;
+  const failPct = finished > 0 ? 100 - okPct : 0;
+  return (
+    <div>
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-surface-3" aria-hidden="true">
+        <span className="h-full bg-primary transition-[width] duration-slow ease-brand-out" style={{ width: `${okPct}%` }} />
+        <span className="h-full bg-destructive transition-[width] duration-slow ease-brand-out" style={{ width: `${failPct}%` }} />
+      </div>
+      <p className="num mt-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">{live.total.toLocaleString()}</span> jobs ·{" "}
+        {live.done.toLocaleString()} done
+        {live.running > 0 ? <> · <span className="text-primary dark:text-brand-hi">{live.running} running</span></> : null}
+        {live.queued > 0 ? <> · <span className="text-warning">{live.queued} waiting</span></> : null}
+        {live.failed > 0 ? <> · <span className="text-destructive">{live.failed.toLocaleString()} failed</span></> : null}
+      </p>
+    </div>
+  );
+}
+
+/** Journeys with nothing in flight report a legacy "pending" status; show that as idle. */
+function JourneyStatus({ badge }: { badge: string }) {
+  if (badge.toLowerCase() === "pending") return <StatusPill tone="neutral">Idle</StatusPill>;
+  return <StatusPill status={badge} />;
+}
+
 type JourneyCardProps = {
   journey: SimpleJourneySummary;
   selected: boolean;
@@ -122,87 +149,70 @@ function JourneyCard({
   isCancelling,
   live,
 }: JourneyCardProps) {
-
   return (
-    <Card className={selected ? "ring-2 ring-primary/60" : undefined}>
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-start gap-2 min-w-0">
-            <input
-              type="checkbox"
-              aria-label={`Select ${journey.name}`}
-              checked={selected}
-              onChange={onToggleSelect}
-              className="mt-1 rounded border-border shrink-0"
-            />
-            <CardTitle className="text-base">{journey.name}</CardTitle>
-          </div>
-          <StatusBadge status={live.badge} />
+    <article
+      className={cn(
+        "group flex min-w-0 flex-col rounded-xl border bg-card p-5 shadow-xs transition-[border-color,box-shadow,transform] duration-200 ease-brand hover:-translate-y-0.5 hover:shadow-md",
+        selected ? "border-brand/60 ring-1 ring-brand/40" : "border-border hover:border-brand/40",
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <input
+            type="checkbox"
+            aria-label={`Select ${journey.name}`}
+            checked={selected}
+            onChange={onToggleSelect}
+            className="check mt-0.5"
+          />
+          <span className="min-w-0">
+            <Link to={`/journeys/${journey.journeyId}`} className="block truncate text-md font-medium text-foreground hover:text-primary dark:hover:text-brand-hi">
+              {journey.name}
+            </Link>
+            <span className="mono-id">{journey.journeyId}</span>
+          </span>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {journey.description ? (
-          <p className="text-sm text-muted-foreground line-clamp-2">{journey.description}</p>
-        ) : null}
-        <div className="grid grid-cols-5 gap-2 text-center text-xs">
-          <div>
-            <p className="text-muted-foreground">Jobs</p>
-            <p className="font-semibold">{live.total}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Done</p>
-            <p className="font-semibold text-emerald-400">{live.done}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Run</p>
-            <p className="font-semibold text-blue-400">{live.running}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Wait</p>
-            <p className="font-semibold text-amber-400">{live.queued}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Failed</p>
-            <p className="font-semibold text-red-400">{live.failed}</p>
-          </div>
-        </div>
-        <p className="text-xs text-muted-foreground font-mono">{journey.journeyId}</p>
-        <div className="flex flex-wrap gap-2">
+        <JourneyStatus badge={live.badge} />
+      </div>
+
+      <p className="mt-3 line-clamp-2 min-h-10 text-sm text-muted-foreground">
+        {journey.description || "No description."}
+      </p>
+
+      <div className="mt-4">
+        <OutcomeBar live={live} />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-4">
+        <Button
+          size="sm"
+          disabled={isRunning || isCancelling}
+          onClick={onRun}
+          data-testid={`run-journey-${journey.journeyId}`}
+        >
+          <Icon name={isRunning ? "spinner" : "play"} className={isRunning ? "animate-spin" : undefined} />
+          Run
+        </Button>
+        {live.jobId ? (
           <Button
             size="sm"
-            disabled={isRunning || isCancelling}
-            onClick={onRun}
-            data-testid={`run-journey-${journey.journeyId}`}
+            variant="outline"
+            disabled={isCancelling}
+            onClick={onCancel}
+            data-testid={`cancel-journey-${journey.journeyId}`}
           >
-            {isRunning ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-            Run
+            <Icon name={isCancelling ? "spinner" : "close"} className={isCancelling ? "animate-spin" : "h-3 w-3"} />
+            Cancel
           </Button>
-          {live.jobId ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={isCancelling}
-              onClick={onCancel}
-              data-testid={`cancel-journey-${journey.journeyId}`}
-            >
-              {isCancelling ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Square className="h-4 w-4" />
-              )}
-              Cancel
-            </Button>
-          ) : null}
-          <Button variant="outline" size="sm" asChild>
-            <Link to={`/journeys/${journey.journeyId}`}>Open</Link>
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        ) : null}
+        <Button variant="ghost" size="sm" className="ml-auto" asChild>
+          <Link to={`/journeys/${journey.journeyId}`}>
+            Open
+            <Icon name="arrow-right" className="h-3.5 w-3.5" />
+          </Link>
+        </Button>
+      </div>
+    </article>
   );
 }
 
@@ -219,42 +229,39 @@ function JourneyListRow({
   live,
 }: JourneyListRowProps) {
   return (
-    <tr className={`border-b border-border/50 ${selected ? "bg-primary/5" : ""}`}>
-      <td className="py-2 pr-2">
+    <tr className={selected ? "!bg-primary/5" : undefined}>
+      <td>
         <input
           type="checkbox"
           aria-label={`Select ${journey.name}`}
           checked={selected}
           onChange={onToggleSelect}
-          className="rounded border-border"
+          className="check"
         />
       </td>
-      <td className="py-2 pr-4">
-        <Link to={`/journeys/${journey.journeyId}`} className="font-medium text-primary hover:underline">
+      <td className="max-w-[360px]">
+        <Link to={`/journeys/${journey.journeyId}`} className="block truncate font-medium text-foreground hover:text-primary dark:hover:text-brand-hi">
           {journey.name}
         </Link>
-        {journey.description ? (
-          <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5">{journey.description}</p>
-        ) : null}
+        <span className="mono-id">{journey.journeyId}</span>
       </td>
-      <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">{journey.journeyId}</td>
-      <td className="py-2 pr-4">
-        <StatusBadge status={live.badge} />
+      <td>
+        <JourneyStatus badge={live.badge} />
       </td>
-      <td className="py-2 pr-4 text-center">{live.total}</td>
-      <td className="py-2 pr-4 text-center text-emerald-400">{live.done}</td>
-      <td className="py-2 pr-4 text-center text-blue-400">{live.running}</td>
-      <td className="py-2 pr-4 text-center text-amber-400">{live.queued}</td>
-      <td className="py-2 pr-4 text-center text-red-400">{live.failed}</td>
-      <td className="py-2">
-        <div className="flex gap-2">
+      <td className="r num">{live.total.toLocaleString()}</td>
+      <td className="r num">{live.done.toLocaleString()}</td>
+      <td className={cn("r num", live.running > 0 ? "text-primary dark:text-brand-hi" : "text-subtle-foreground")}>{live.running}</td>
+      <td className={cn("r num", live.queued > 0 ? "text-warning" : "text-subtle-foreground")}>{live.queued}</td>
+      <td className={cn("r num", live.failed > 0 ? "text-destructive" : "text-subtle-foreground")}>{live.failed.toLocaleString()}</td>
+      <td>
+        <div className="flex justify-end gap-2">
           <Button size="sm" disabled={isRunning || isCancelling} onClick={onRun}>
-            {isRunning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            <Icon name={isRunning ? "spinner" : "play"} className={isRunning ? "animate-spin" : undefined} />
             Run
           </Button>
           {live.jobId ? (
             <Button size="sm" variant="outline" disabled={isCancelling} onClick={onCancel}>
-              {isCancelling ? <Loader2 className="h-4 w-4 animate-spin" /> : <Square className="h-4 w-4" />}
+              <Icon name={isCancelling ? "spinner" : "close"} className={isCancelling ? "animate-spin" : "h-3 w-3"} />
               Cancel
             </Button>
           ) : null}
@@ -269,24 +276,33 @@ function JourneyListRow({
 
 function DslJourneyCard({ journey }: { journey: DslJourneySummary }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">{journey.display_name || journey.id}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <p className="text-xs text-muted-foreground font-mono">{journey.id}</p>
-        <p className="text-xs">v{journey.version}</p>
+    <article className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-5 shadow-xs transition-[border-color,box-shadow,transform] duration-200 ease-brand hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-md font-medium text-foreground">{journey.display_name || journey.id}</h3>
+          <p className="mono-id truncate">{journey.id}</p>
+        </div>
+        <span className="num shrink-0 rounded border border-border-strong px-1.5 py-px text-xs text-muted-foreground">v{journey.version}</span>
+      </div>
+      <div className="mt-4 border-t border-border pt-4">
         <Button variant="outline" size="sm" asChild>
-          <Link to={`/journeys/${journey.id}/studio`}>Edit YAML</Link>
+          <Link to={`/journeys/${journey.id}/studio`}>
+            <Icon name="file-code" />
+            Edit YAML
+          </Link>
         </Button>
-      </CardContent>
-    </Card>
+      </div>
+    </article>
   );
 }
+
+type JourneyFilter = "all" | "active" | "failures" | "idle";
 
 export function JourneysListPage() {
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<JourneyFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [cancellingIds, setCancellingIds] = useState<Set<string>>(new Set());
   const { running: runningIds, bulk: bulkRunning, message: runMessage } = useSyncExternalStore(
@@ -455,87 +471,137 @@ export function JourneysListPage() {
     live: liveByJourney.get(journey.journeyId) ?? journeyLive(journey, runningIds.has(journey.journeyId), queueJobs),
   });
 
+  const liveOf = (j: SimpleJourneySummary) =>
+    liveByJourney.get(j.journeyId) ?? journeyLive(j, runningIds.has(j.journeyId), queueJobs);
+  const counts = { active: 0, failures: 0, idle: 0 };
+  for (const j of simpleJourneys) {
+    const live = liveOf(j);
+    if (live.running + live.queued > 0) counts.active += 1;
+    else counts.idle += 1;
+    if (live.failed > 0) counts.failures += 1;
+  }
+  const q = search.trim().toLowerCase();
+  const matches = (text: string) => !q || text.toLowerCase().includes(q);
+  const visibleJourneys = simpleJourneys.filter((j) => {
+    if (!matches(`${j.name} ${j.journeyId} ${j.description ?? ""} ${j.odaComponentType ?? ""}`)) return false;
+    const live = liveOf(j);
+    if (filter === "active") return live.running + live.queued > 0;
+    if (filter === "failures") return live.failed > 0;
+    if (filter === "idle") return live.running + live.queued === 0;
+    return true;
+  });
+  const visibleDsl = dslJourneys.filter((j) => matches(`${j.display_name} ${j.id}`));
+  const messageTone = runMessage && /^Failed/.test(runMessage) ? "danger" : "info";
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold">Journeys</h2>
-          <p className="text-sm text-muted-foreground">
-            Stage-based pipelines and YAML-defined DSL journeys.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-5">
+      <PageHeader
+        title="Journeys"
+        description="Stage-based pipelines and YAML-defined DSL journeys."
+        actions={
+          <>
+            {simpleJourneys.length > 0 ? (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={bulkRunning || runningIds.size > 0}
+                onClick={() => void runMany(simpleJourneys.map((j) => j.journeyId))}
+                data-testid="run-all-journeys"
+              >
+                <Icon name="play" />
+                Run all ({simpleJourneys.length})
+              </Button>
+            ) : null}
+            <Button size="sm" asChild>
+              <Link to="/journeys/new/studio">
+                <Icon name="plus" />
+                New DSL journey
+              </Link>
+            </Button>
+          </>
+        }
+      />
+
+      {hasAny ? (
+        <Toolbar>
+          <SearchInput value={search} onChange={setSearch} placeholder="Search journeys" />
           {simpleJourneys.length > 0 ? (
-            <div className="flex rounded-md border border-border overflow-hidden">
-              <Button
-                type="button"
-                variant={viewMode === "grid" ? "default" : "ghost"}
-                size="sm"
-                className="rounded-none"
-                onClick={() => setViewMode("grid")}
-                aria-label="Grid view"
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </Button>
-              <Button
-                type="button"
-                variant={viewMode === "list" ? "default" : "ghost"}
-                size="sm"
-                className="rounded-none"
-                onClick={() => setViewMode("list")}
-                aria-label="List view"
-              >
-                <List className="h-4 w-4" />
-              </Button>
-            </div>
+            <Chips<JourneyFilter>
+              label="Filter journeys"
+              value={filter}
+              onChange={setFilter}
+              options={[
+                { value: "all", label: "All", count: simpleJourneys.length },
+                { value: "active", label: "Active now", count: counts.active },
+                { value: "failures", label: "With failures", count: counts.failures },
+                { value: "idle", label: "Idle", count: counts.idle },
+              ]}
+            />
           ) : null}
-          {selectedCount > 0 ? (
+          <ToolbarSpacer />
+          {simpleJourneys.length > 0 ? (
+            <>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  aria-label="Select all journeys"
+                  checked={allSimpleSelected}
+                  onChange={toggleSelectAll}
+                  className="check"
+                />
+                Select all
+              </label>
+              <Segmented<ViewMode>
+                label="View"
+                value={viewMode}
+                onChange={setViewMode}
+                options={[
+                  { value: "grid", label: <span className="flex items-center gap-1.5" aria-label="Grid view"><Icon name="grid" className="h-3.5 w-3.5" />Cards</span> },
+                  { value: "list", label: <span className="flex items-center gap-1.5" aria-label="List view"><Icon name="list" className="h-3.5 w-3.5" />Table</span> },
+                ]}
+              />
+            </>
+          ) : null}
+        </Toolbar>
+      ) : null}
+
+      {selectedCount > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface-2/70 px-4 py-2.5">
+          <span className="text-sm text-foreground">
+            <span className="num font-medium">{selectedCount}</span> selected
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              Clear selection
+            </Button>
             <Button
               size="sm"
               disabled={bulkRunning}
               onClick={() => void runMany(Array.from(selected))}
               data-testid="bulk-run-journeys"
             >
-              {bulkRunning ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
+              <Icon name={bulkRunning ? "spinner" : "play"} className={bulkRunning ? "animate-spin" : undefined} />
               Run selected ({selectedCount})
             </Button>
-          ) : null}
-          {simpleJourneys.length > 0 ? (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={bulkRunning || runningIds.size > 0}
-              onClick={() => void runMany(simpleJourneys.map((j) => j.journeyId))}
-              data-testid="run-all-journeys"
-            >
-              Run all ({simpleJourneys.length})
-            </Button>
-          ) : null}
-          <Button asChild>
-            <Link to="/journeys/new/studio">
-              <Plus className="h-4 w-4" />
-              New DSL journey
-            </Link>
-          </Button>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {runMessage ? (
-        <p className="text-sm text-muted-foreground" data-testid="run-message">
+        <Notice tone={messageTone} data-testid="run-message">
           {runMessage}
-        </p>
+        </Notice>
       ) : null}
 
       {isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading journeys…</p>
+        <TableShell>
+          <SkeletonRows rows={6} />
+        </TableShell>
       ) : error ? (
-        <EmptyState title="Could not load journeys" description={String(error)} />
+        <InlineError>Could not load journeys. {String(error)}</InlineError>
       ) : !hasAny ? (
         <EmptyState
+          icon="route"
           title="No journeys yet"
           description="Seed sample journeys for local dev or create a DSL journey."
           action={
@@ -548,60 +614,58 @@ export function JourneysListPage() {
         <>
           {simpleJourneys.length > 0 ? (
             <section className="space-y-3" data-testid="simple-journeys">
-              {viewMode === "grid" ? (
+              {visibleJourneys.length === 0 ? (
+                <EmptyState
+                  icon="search"
+                  title="No journeys match"
+                  description="Try a different search or filter."
+                  action={
+                    <button type="button" className="link" onClick={() => { setSearch(""); setFilter("all"); }}>
+                      Clear filters
+                    </button>
+                  }
+                />
+              ) : viewMode === "grid" ? (
                 <JourneyGrid>
-                  {simpleJourneys.map((j) => (
+                  {visibleJourneys.map((j) => (
                     <JourneyCard key={j.journeyId} {...journeyRowProps(j)} />
                   ))}
                 </JourneyGrid>
               ) : (
-                <Card>
-                  <CardContent className="pt-4">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="text-left text-muted-foreground border-b border-border">
-                            <th className="py-2 pr-2 w-8">
-                              <input
-                                type="checkbox"
-                                aria-label="Select all journeys"
-                                checked={allSimpleSelected}
-                                onChange={toggleSelectAll}
-                                className="rounded border-border"
-                              />
-                            </th>
-                            <th className="py-2 pr-4">Journey</th>
-                            <th className="py-2 pr-4">ID</th>
-                            <th className="py-2 pr-4">Status</th>
-                            <th className="py-2 pr-4 text-center">Jobs</th>
-                            <th className="py-2 pr-4 text-center">Done</th>
-                            <th className="py-2 pr-4 text-center">Run</th>
-                            <th className="py-2 pr-4 text-center">Wait</th>
-                            <th className="py-2 pr-4 text-center">Failed</th>
-                            <th className="py-2">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {simpleJourneys.map((j) => (
-                            <JourneyListRow key={j.journeyId} {...journeyRowProps(j)} />
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </CardContent>
-                </Card>
+                <TableShell>
+                  <table className="tbl">
+                    <thead>
+                      <tr>
+                        <th className="w-10" />
+                        <th>Journey</th>
+                        <th>Status</th>
+                        <th className="r">Jobs</th>
+                        <th className="r">Done</th>
+                        <th className="r">Run</th>
+                        <th className="r">Wait</th>
+                        <th className="r">Failed</th>
+                        <th className="r">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleJourneys.map((j) => (
+                        <JourneyListRow key={j.journeyId} {...journeyRowProps(j)} />
+                      ))}
+                    </tbody>
+                  </table>
+                </TableShell>
               )}
             </section>
           ) : null}
 
-          {dslJourneys.length > 0 ? (
-            <section className="space-y-3" data-testid="dsl-journeys">
+          {visibleDsl.length > 0 ? (
+            <section className="space-y-3 pt-2" data-testid="dsl-journeys">
               <div>
-                <h3 className="text-sm font-medium">DSL journeys</h3>
-                <p className="text-xs text-muted-foreground">YAML-defined journeys editable in the studio.</p>
+                <h3 className="text-md font-medium text-foreground">DSL journeys</h3>
+                <p className="text-sm text-muted-foreground">YAML-defined journeys editable in the studio.</p>
               </div>
               <JourneyGrid>
-                {dslJourneys.map((j) => (
+                {visibleDsl.map((j) => (
                   <DslJourneyCard key={`${j.id}-${j.version}`} journey={j} />
                 ))}
               </JourneyGrid>

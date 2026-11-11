@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 
+import { Icon } from "@/components/ds/Icon";
+import { PageHeader, Panel, StatusPill } from "@/components/ds/kit";
 import { ExecutionGraphView } from "@/components/execution/ExecutionGraphView";
-import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useExecutionStream } from "@/hooks/useExecutionStream";
 import { api } from "@/services/api";
 import { truncateId } from "@/lib/utils";
@@ -43,65 +43,71 @@ export function ExecutionDetailPage() {
   });
 
   const status = String(execution.data?.status ?? "unknown");
+  const journeyId = execution.data?.journey_id ? String(execution.data.journey_id) : null;
+  const nodeStates = nodes.data ?? [];
+  const doneNodes = nodeStates.filter((n) => ["succeeded", "completed"].includes(n.status.toLowerCase())).length;
+  const shown = events.slice().reverse().slice(0, 30);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" size="sm" asChild>
-          <Link to="/executions">← Executions</Link>
-        </Button>
-        <h2 className="text-lg font-semibold font-mono">{truncateId(executionId, 16)}</h2>
-        <StatusBadge status={status} />
-        <span
-          className={`text-xs ${connected ? "text-emerald-400" : "text-muted-foreground"}`}
-          data-testid="sse-status"
+    <div className="space-y-5">
+      <PageHeader
+        back={
+          <Link to="/executions" className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground">
+            <Icon name="chevron-left" className="h-3.5 w-3.5" />
+            Executions
+          </Link>
+        }
+        title={<span className="font-mono text-lg" title={executionId}>{truncateId(executionId, 16)}</span>}
+        description={journeyId ? <>DSL execution of <span className="font-mono text-foreground">{journeyId}</span></> : "DSL execution"}
+        meta={
+          <>
+            <StatusPill status={status} variant="soft" />
+            <StatusPill tone={connected ? "success" : "warning"} live={connected} data-testid="sse-status" className="font-normal text-muted-foreground">
+              SSE {connected ? "connected" : "connecting…"}
+            </StatusPill>
+          </>
+        }
+        actions={
+          !["succeeded", "failed", "cancelled"].includes(status.toLowerCase()) ? (
+            <Button variant="destructive" size="sm" onClick={() => cancelMut.mutate()} disabled={cancelMut.isPending}>
+              <Icon name="close" className="h-3 w-3" />
+              Cancel
+            </Button>
+          ) : null
+        }
+      />
+
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+        <Panel
+          title="Live graph"
+          description={nodeStates.length > 0 ? `${doneNodes} of ${nodeStates.length} nodes finished` : undefined}
+          bodyClassName="p-3 sm:p-3"
         >
-          SSE {connected ? "connected" : "connecting…"}
-        </span>
-        {!["succeeded", "failed", "cancelled"].includes(status.toLowerCase()) ? (
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => cancelMut.mutate()}
-            disabled={cancelMut.isPending}
-          >
-            Cancel
-          </Button>
-        ) : null}
-      </div>
+          <ExecutionGraphView graph={graph.data} nodeStates={nodeStates} />
+        </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Live graph</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ExecutionGraphView graph={graph.data} nodeStates={nodes.data ?? []} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Event stream</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="max-h-48 overflow-y-auto font-mono text-xs space-y-1" data-testid="event-stream">
+        <Panel title="Event stream" description={events.length > 0 ? `Latest ${shown.length} of ${events.length}` : undefined} flush>
+          <ul className="scroll-thin max-h-[444px] divide-y divide-border overflow-y-auto" data-testid="event-stream">
             {events.length === 0 ? (
-              <li className="text-muted-foreground">Waiting for events…</li>
+              <li className="px-4 py-8 text-center text-sm text-subtle-foreground sm:px-5">Waiting for events…</li>
             ) : (
-              events
-                .slice()
-                .reverse()
-                .slice(0, 30)
-                .map((ev, i) => (
-                  <li key={`${ev.timestamp}-${i}`}>
-                    <span className="text-primary">{ev.type}</span>{" "}
-                    {JSON.stringify(ev.data ?? {})}
-                  </li>
-                ))
+              shown.map((ev, i) => (
+                <li key={`${ev.timestamp}-${i}`} className="px-4 py-2 sm:px-5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-mono text-xs font-medium text-primary dark:text-brand-hi">{ev.type}</span>
+                    {ev.timestamp ? (
+                      <span className="num shrink-0 text-xs text-subtle-foreground">
+                        {new Date(ev.timestamp).toLocaleTimeString(undefined, { hour12: false })}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-0.5 break-all font-mono text-xs leading-5 text-muted-foreground">{JSON.stringify(ev.data ?? {})}</div>
+                </li>
+              ))
             )}
           </ul>
-        </CardContent>
-      </Card>
+        </Panel>
+      </div>
     </div>
   );
 }

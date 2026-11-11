@@ -1,0 +1,32 @@
+/*
+ * Recharts defaults. Colours come from the --chart-* tokens in tokens.css.
+ */
+
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: hsl(var(--chart-grid));
+}
+
+.recharts-text.recharts-cartesian-axis-tick-value {
+  fill: hsl(var(--chart-axis));
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.recharts-legend-item-text {
+  color: hsl(var(--muted-foreground)) !important;
+  font-size: 12px;
+}
+
+.recharts-default-tooltip {
+  background: hsl(var(--popover)) !important;
+  border: 1px solid hsl(var(--border)) !important;
+  border-radius: 8px !important;
+  box-shadow: var(--shadow-md);
+  color: hsl(var(--popover-foreground));
+  font-size: 12px;
+}
+
+[data-chart] {
+  @apply overflow-hidden rounded-lg;
+}

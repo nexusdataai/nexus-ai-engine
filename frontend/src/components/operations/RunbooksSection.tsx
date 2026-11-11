@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Inbox, RefreshCw, RotateCcw, ServerCrash, Trash2 } from "lucide-react";
 
+import { Icon } from "@/components/ds/Icon";
+import { CodeBlock, EmptyState, Field, InlineError, MetricStrip, Notice, Panel, StatusPill, SubHeading, Toolbar, toneOf, type Metric } from "@/components/ds/kit";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { api } from "@/services/api";
 import type { CrashAnalyzerResponse, CrashedPod, DlqEntry, DlqListResponse, StaleJob, StaleJobsResponse } from "@/types/runbooks";
+
+import { stripColumns } from "./parts";
 
 function StaleJobsPanel() {
   const [loading, setLoading] = useState(false);
@@ -48,72 +51,75 @@ function StaleJobsPanel() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={load} disabled={loading} variant="outline" size="sm">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          Scan Stale Jobs
-        </Button>
-        <Button onClick={cancelAll} disabled={cancelling || !data?.jobs.length} variant="destructive" size="sm">
-          <Trash2 className="h-4 w-4" />
-          Cancel All Stale
-        </Button>
-      </div>
-      {error ? <p className="text-sm text-red-500">{error}</p> : null}
+    <div className="space-y-6">
+      {error ? <InlineError>{error}</InlineError> : null}
       {data ? (
-        <div className="flex flex-wrap gap-2 text-sm">
-          <span className="rounded-full border px-2 py-0.5">Total: {data.summary.total_stale ?? 0}</span>
-          <span className="rounded-full border px-2 py-0.5">STALE: {data.summary.STALE ?? 0}</span>
-          <span className="rounded-full border px-2 py-0.5">LIKELY-STUCK: {data.summary["LIKELY-STUCK"] ?? 0}</span>
-          <span className="rounded-full border px-2 py-0.5">UNVERIFIED-LONG: {data.summary["UNVERIFIED-LONG"] ?? 0}</span>
-          <span className="rounded-full border px-2 py-0.5">Blocked schedules: {data.summary.blocked_schedules ?? 0}</span>
-        </div>
+        <MetricStrip
+          columns={5}
+          items={[
+            { label: "Total", value: data.summary.total_stale ?? 0 },
+            { label: "STALE", value: data.summary.STALE ?? 0 },
+            { label: "LIKELY-STUCK", value: data.summary["LIKELY-STUCK"] ?? 0 },
+            { label: "UNVERIFIED-LONG", value: data.summary["UNVERIFIED-LONG"] ?? 0 },
+            { label: "Blocked schedules", value: data.summary.blocked_schedules ?? 0 },
+          ]}
+        />
       ) : null}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Stale Jobs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!data ? (
-            <p className="text-sm text-muted-foreground">Run a scan to list stuck in-progress jobs.</p>
-          ) : data.jobs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No stale jobs found.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-3">Job ID</th>
-                    <th className="py-2 pr-3">Journey</th>
-                    <th className="py-2 pr-3">Stage</th>
-                    <th className="py-2 pr-3">Step</th>
-                    <th className="py-2 pr-3">Age (min)</th>
-                    <th className="py-2 pr-3">Confidence</th>
-                    <th className="py-2">Action</th>
+      <Panel
+        title="Stale Jobs"
+        flush
+        actions={
+          <>
+            <Button onClick={load} disabled={loading} size="sm">
+              <Icon name="refresh" className={loading ? "animate-spin" : undefined} />
+              Scan Stale Jobs
+            </Button>
+            <Button onClick={cancelAll} disabled={cancelling || !data?.jobs.length} variant="destructive" size="sm">
+              <Icon name="trash" />
+              Cancel All Stale
+            </Button>
+          </>
+        }
+      >
+        {!data ? (
+          <EmptyState bare icon="clock" title="Run a scan to list stuck in-progress jobs." />
+        ) : data.jobs.length === 0 ? (
+          <EmptyState bare icon="check-circle" title="No stale jobs found." />
+        ) : (
+          <div className="scroll-thin overflow-x-auto">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Job ID</th>
+                  <th>Journey</th>
+                  <th>Stage</th>
+                  <th>Step</th>
+                  <th className="r">Age (min)</th>
+                  <th>Confidence</th>
+                  <th className="r">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.jobs.map((job) => (
+                  <tr key={`${job.pk}-${job.sk}`}>
+                    <td className="font-mono text-xs text-foreground">{job.job_id}</td>
+                    <td>{job.journey_id}</td>
+                    <td>{job.stage_id}</td>
+                    <td className="text-muted-foreground">{job.current_step || "—"}</td>
+                    <td className="r num">{Number(job.age_min).toFixed(1)}</td>
+                    <td>{job.confidence}</td>
+                    <td className="r">
+                      <Button size="sm" variant="ghost" onClick={() => cancelOne(job)}>
+                        Cancel
+                      </Button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {data.jobs.map((job) => (
-                    <tr key={`${job.pk}-${job.sk}`} className="border-b border-border/50">
-                      <td className="py-2 pr-3 font-mono text-xs">{job.job_id}</td>
-                      <td className="py-2 pr-3">{job.journey_id}</td>
-                      <td className="py-2 pr-3">{job.stage_id}</td>
-                      <td className="py-2 pr-3">{job.current_step || "—"}</td>
-                      <td className="py-2 pr-3">{Number(job.age_min).toFixed(1)}</td>
-                      <td className="py-2 pr-3">{job.confidence}</td>
-                      <td className="py-2">
-                        <Button size="sm" variant="ghost" onClick={() => cancelOne(job)}>
-                          Cancel
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }
@@ -121,59 +127,67 @@ function StaleJobsPanel() {
 function CrashPodCard({ pod }: { pod: CrashedPod }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-lg border">
-      <button type="button" className="flex w-full items-center justify-between gap-2 p-3 text-left hover:bg-muted/40" onClick={() => setOpen((v) => !v)}>
-        <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <span className="font-mono text-sm font-medium truncate">{pod.name}</span>
-          <span className="rounded-full border px-2 py-0.5 text-xs">{pod.phase}</span>
-          <span className="rounded-full border border-red-500/40 px-2 py-0.5 text-xs text-red-400">{pod.restarts} restarts</span>
-          {pod.node ? <span className="rounded-full border px-2 py-0.5 text-xs">node: {pod.node}</span> : null}
-        </div>
+    <li>
+      <button
+        type="button"
+        aria-expanded={open}
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-surface-2/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:px-5"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Icon name={open ? "chevron-down" : "chevron-right"} className="h-3.5 w-3.5 text-subtle-foreground" />
+        <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="truncate font-mono text-sm font-medium text-foreground">{pod.name}</span>
+          <span className="text-xs text-muted-foreground">{pod.phase}</span>
+          {pod.node ? <span className="text-xs text-muted-foreground">node: {pod.node}</span> : null}
+        </span>
+        <StatusPill tone="danger">{pod.restarts} restarts</StatusPill>
       </button>
       {open ? (
-        <div className="px-3 pb-3 space-y-3">
+        <div className="space-y-4 border-t border-border bg-surface-2/40 px-4 py-4 sm:px-5">
           {(pod.analysis || []).length > 0 ? (
-            <div className="rounded-md bg-amber-500/10 border border-amber-500/20 p-2 text-xs space-y-1">
+            <Notice tone="warning">
               <p className="font-medium">Analysis</p>
               {pod.analysis!.map((line) => (
-                <p key={line} className="text-muted-foreground">
+                <p key={line} className="mt-1 text-muted-foreground">
                   {line}
                 </p>
               ))}
-            </div>
+            </Notice>
           ) : null}
           {(pod.containers || []).map((ctr) => (
-            <div key={ctr.name} className="rounded border p-2 text-xs space-y-2">
-              <div className="flex flex-wrap gap-2 items-center">
-                <span className="font-medium">container: {ctr.name}</span>
-                <span className="rounded-full border px-2 py-0.5">{ctr.restart_count} restarts</span>
+            <div key={ctr.name} className="space-y-2 text-xs">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span className="text-sm font-medium text-foreground">container: {ctr.name}</span>
+                <span className="num text-muted-foreground">{ctr.restart_count} restarts</span>
                 {ctr.last_terminated?.reason ? (
-                  <span className="rounded-full border px-2 py-0.5">
+                  <span className="text-muted-foreground">
                     {ctr.last_terminated.reason} (exit {ctr.last_terminated.exit_code})
                   </span>
                 ) : null}
               </div>
-              {ctr.last_terminated?.message ? <p className="text-muted-foreground whitespace-pre-wrap">{ctr.last_terminated.message}</p> : null}
+              {ctr.last_terminated?.message ? <p className="whitespace-pre-wrap text-muted-foreground">{ctr.last_terminated.message}</p> : null}
               {ctr.previous_log_tail ? (
-                <pre className="text-[10px] bg-zinc-950 text-zinc-100 p-2 rounded max-h-48 overflow-auto whitespace-pre-wrap">{ctr.previous_log_tail}</pre>
+                <CodeBlock wrap maxHeight={192}>{ctr.previous_log_tail}</CodeBlock>
               ) : (
-                <p className="text-muted-foreground italic">No previous-container log retained by kubelet.</p>
+                <p className="text-subtle-foreground">No previous-container log retained by kubelet.</p>
               )}
             </div>
           ))}
           {(pod.events || []).length > 0 ? (
-            <div className="space-y-1">
-              <p className="text-xs font-medium">Recent pod events</p>
-              {pod.events!.map((ev, i) => (
-                <p key={`${ev.reason}-${i}`} className="text-[11px] text-muted-foreground font-mono">
-                  {ev.last_seen} {ev.type}/{ev.reason}: {ev.message}
-                </p>
-              ))}
+            <div>
+              <SubHeading>Recent pod events</SubHeading>
+              <div className="space-y-1">
+                {pod.events!.map((ev, i) => (
+                  <p key={`${ev.reason}-${i}`} className="break-words font-mono text-xs text-muted-foreground">
+                    {ev.last_seen} {ev.type}/{ev.reason}: {ev.message}
+                  </p>
+                ))}
+              </div>
             </div>
           ) : null}
         </div>
       ) : null}
-    </div>
+    </li>
   );
 }
 
@@ -196,53 +210,52 @@ function CrashAnalyzerPanel() {
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-end gap-2">
-        <div>
-          <label className="text-xs text-muted-foreground block mb-1">Component filter (optional)</label>
+    <div className="space-y-6">
+      <Toolbar className="items-end">
+        <Field label="Component filter (optional)" htmlFor="crash-component" className="w-full sm:w-64">
           <input
-            className="h-8 w-48 rounded-md border bg-background px-2 text-xs"
+            id="crash-component"
+            className="field field-sm"
             value={component}
             onChange={(e) => setComponent(e.target.value)}
             placeholder="e.g. backend, frontend"
           />
-        </div>
-        <Button onClick={load} disabled={loading} variant="outline" size="sm">
-          <ServerCrash className={`h-4 w-4 ${loading ? "animate-pulse" : ""}`} />
+        </Field>
+        <Button onClick={load} disabled={loading} size="sm">
+          <Icon name={loading ? "refresh" : "search"} className={loading ? "animate-spin" : undefined} />
           Analyze Crashes
         </Button>
-      </div>
-      {error ? <p className="text-sm text-red-500">{error}</p> : null}
-      {data ? (
-        <p className="text-sm text-muted-foreground">
-          Namespace: <span className="font-mono">{data.namespace}</span>
-          {data.log_tail_lines ? <span className="ml-2">· log tail: {data.log_tail_lines} lines</span> : null}
-          {!data.available && data.message ? <span className="ml-2 text-amber-600">({data.message})</span> : null}
-        </p>
-      ) : null}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4" />
-            Pods with Restarts ({data?.count ?? 0})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!data ? (
-            <p className="text-sm text-muted-foreground">
-              Run analysis to inspect restarted pods — includes exit reason, previous logs, and events.
-            </p>
-          ) : data.pods.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No restarted pods found in this namespace.</p>
-          ) : (
-            <div className="space-y-2">
-              {data.pods.map((pod) => (
-                <CrashPodCard key={pod.name} pod={pod} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      </Toolbar>
+      {error ? <InlineError>{error}</InlineError> : null}
+      <Panel
+        title={<>Pods with Restarts ({data?.count ?? 0})</>}
+        flush
+        footer={
+          data ? (
+            <>
+              Namespace: <span className="font-mono text-foreground">{data.namespace}</span>
+              {data.log_tail_lines ? <span className="ml-2">· log tail: {data.log_tail_lines} lines</span> : null}
+              {!data.available && data.message ? <span className="ml-2 text-warning">({data.message})</span> : null}
+            </>
+          ) : undefined
+        }
+      >
+        {!data ? (
+          <EmptyState
+            bare
+            icon="alert-triangle"
+            title="Run analysis to inspect restarted pods — includes exit reason, previous logs, and events."
+          />
+        ) : data.pods.length === 0 ? (
+          <EmptyState bare icon="check-circle" title="No restarted pods found in this namespace." />
+        ) : (
+          <ul className="divide-y divide-border">
+            {data.pods.map((pod) => (
+              <CrashPodCard key={pod.name} pod={pod} />
+            ))}
+          </ul>
+        )}
+      </Panel>
     </div>
   );
 }
@@ -339,17 +352,27 @@ function DlqPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- initial fetch only
   }, []);
 
+  const summary: Metric[] = data
+    ? [
+        { label: "Total", value: data.count },
+        { label: "Pending", value: data.summary.pending_review ?? 0 },
+        { label: "Reprocessed", value: data.summary.reprocessed ?? 0 },
+        { label: "Dismissed", value: data.summary.dismissed ?? 0 },
+        ...(data.imported != null ? [{ label: "Imported", value: data.imported }] : []),
+      ]
+    : [];
+
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
-        Failed transformation jobs land here after <span className="font-mono">fail_job</span>. Reprocess queues a new run of the same stage.
+    <div className="space-y-6">
+      <p className="max-w-3xl text-sm text-muted-foreground">
+        Failed transformation jobs land here after <span className="font-mono text-foreground">fail_job</span>. Reprocess queues a new run of the same stage.
         Select pending or reprocessed entries for bulk re-run; dismissed entries cannot be reprocessed.
       </p>
-      <div className="flex flex-wrap items-end gap-2">
-        <div>
-          <label className="mb-1 block text-xs text-muted-foreground">Status</label>
+      <Toolbar className="items-end">
+        <Field label="Status" htmlFor="dlq-status" className="w-full sm:w-48">
           <select
-            className="h-8 rounded-md border bg-background px-2 text-xs"
+            id="dlq-status"
+            className="field field-sm"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -358,81 +381,71 @@ function DlqPanel() {
             <option value="reprocessed">Reprocessed</option>
             <option value="dismissed">Dismissed</option>
           </select>
-        </div>
+        </Field>
         <Button onClick={load} disabled={loading} variant="outline" size="sm">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          <Icon name="refresh" className={loading ? "animate-spin" : undefined} />
           Load DLQ
         </Button>
         <Button onClick={importFailed} disabled={busy} variant="outline" size="sm">
-          <Inbox className="h-4 w-4" />
+          <Icon name="download" />
           Import Failed Jobs
         </Button>
         <Button onClick={reprocessSelected} disabled={busy || selected.size === 0} size="sm">
-          <RotateCcw className="h-4 w-4" />
+          <Icon name="history" />
           Reprocess Selected ({selected.size})
         </Button>
-      </div>
-      {error ? <p className="text-sm text-red-500">{error}</p> : null}
-      {data ? (
-        <div className="flex flex-wrap gap-2 text-sm">
-          <span className="rounded-full border px-2 py-0.5">Total: {data.count}</span>
-          <span className="rounded-full border px-2 py-0.5">Pending: {data.summary.pending_review ?? 0}</span>
-          <span className="rounded-full border px-2 py-0.5">Reprocessed: {data.summary.reprocessed ?? 0}</span>
-          <span className="rounded-full border px-2 py-0.5">Dismissed: {data.summary.dismissed ?? 0}</span>
-          {data.imported != null ? <span className="rounded-full border px-2 py-0.5">Imported: {data.imported}</span> : null}
-          {data.count > 0 && (data.summary.pending_review ?? 0) === 0 ? (
-            <span className="text-xs text-muted-foreground">No pending entries — switch filter to All or import failed jobs.</span>
-          ) : null}
-        </div>
+      </Toolbar>
+      {error ? <InlineError>{error}</InlineError> : null}
+      {data ? <MetricStrip items={summary} columns={stripColumns(summary.length)} /> : null}
+      {data && data.count > 0 && (data.summary.pending_review ?? 0) === 0 ? (
+        <Notice tone="neutral">No pending entries — switch filter to All or import failed jobs.</Notice>
       ) : null}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Dead Letter Queue</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!data ? (
-            <p className="text-sm text-muted-foreground">Load the DLQ or import existing failed jobs.</p>
-          ) : data.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No DLQ entries. Failed jobs appear here after they fail, or use Import Failed Jobs.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-muted-foreground">
-                    <th className="py-2 pr-2">
-                      <input
-                        type="checkbox"
-                        aria-label="Select all reprocessable entries"
-                        disabled={selectableItems.length === 0 || busy}
-                        checked={selectableItems.length > 0 && selectableItems.every((item) => selected.has(item.sk))}
-                        onChange={(e) => {
-                          if (e.target.checked) setSelected(new Set(selectableItems.map((item) => item.sk)));
-                          else setSelected(new Set());
-                        }}
-                      />
-                    </th>
-                    <th className="py-2 pr-3">Job</th>
-                    <th className="py-2 pr-3">Journey</th>
-                    <th className="py-2 pr-3">Stage</th>
-                    <th className="py-2 pr-3">Error</th>
-                    <th className="py-2 pr-3">Status</th>
-                    <th className="py-2">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.items.map((item) => {
-                    const canSelect = isSelectable(item);
-                    return (
+      <Panel title="Dead Letter Queue" flush>
+        {!data ? (
+          <EmptyState bare icon="box" title="Load the DLQ or import existing failed jobs." />
+        ) : data.items.length === 0 ? (
+          <EmptyState bare icon="box" title="No DLQ entries. Failed jobs appear here after they fail, or use Import Failed Jobs." />
+        ) : (
+          <div className="scroll-thin overflow-x-auto">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th className="w-10">
+                    <input
+                      type="checkbox"
+                      className="check align-middle"
+                      aria-label="Select all reprocessable entries"
+                      disabled={selectableItems.length === 0 || busy}
+                      checked={selectableItems.length > 0 && selectableItems.every((item) => selected.has(item.sk))}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelected(new Set(selectableItems.map((item) => item.sk)));
+                        else setSelected(new Set());
+                      }}
+                    />
+                  </th>
+                  <th>Job</th>
+                  <th>Journey</th>
+                  <th>Stage</th>
+                  <th>Error</th>
+                  <th>Status</th>
+                  <th className="r">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.items.map((item) => {
+                  const canSelect = isSelectable(item);
+                  return (
                     <tr
                       key={item.sk}
-                      className={`border-b border-border/50 ${canSelect ? "cursor-pointer hover:bg-muted/30" : ""}`}
+                      className={cn(canSelect && "cursor-pointer", selected.has(item.sk) && "bg-primary/5")}
                       onClick={() => {
                         if (canSelect && !busy) toggle(item.sk);
                       }}
                     >
-                      <td className="py-2 pr-2" onClick={(e) => e.stopPropagation()}>
+                      <td onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
+                          className="check align-middle"
                           aria-label={`Select ${item.job_id}`}
                           disabled={!canSelect || busy}
                           title={
@@ -446,15 +459,17 @@ function DlqPanel() {
                           onChange={() => toggle(item.sk)}
                         />
                       </td>
-                      <td className="py-2 pr-3 font-mono text-xs">{item.job_id}</td>
-                      <td className="py-2 pr-3">{item.journey_id}</td>
-                      <td className="py-2 pr-3">{item.stage_id || "—"}</td>
-                      <td className="max-w-xs truncate py-2 pr-3 text-xs text-muted-foreground" title={item.error}>
+                      <td className="font-mono text-xs text-foreground">{item.job_id}</td>
+                      <td>{item.journey_id}</td>
+                      <td>{item.stage_id || "—"}</td>
+                      <td className="max-w-xs truncate text-xs text-muted-foreground" title={item.error}>
                         {item.error || "—"}
                       </td>
-                      <td className="py-2 pr-3">{item.status}</td>
-                      <td className="py-2" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex gap-1">
+                      <td>
+                        <StatusPill status={item.status} tone={item.status === "pending_review" ? "warning" : toneOf(item.status)} />
+                      </td>
+                      <td className="r" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
                           {item.status === "pending_review" ? (
                             <>
                               <Button size="sm" variant="ghost" disabled={busy} onClick={() => reprocessOne(item)}>
@@ -466,12 +481,12 @@ function DlqPanel() {
                             </>
                           ) : item.status === "reprocessed" ? (
                             <>
+                              {item.new_job_id ? (
+                                <span className="font-mono text-xs text-muted-foreground">{item.new_job_id}</span>
+                              ) : null}
                               <Button size="sm" variant="ghost" disabled={busy} onClick={() => reprocessOne(item)}>
                                 Re-run
                               </Button>
-                              {item.new_job_id ? (
-                                <span className="self-center font-mono text-xs text-muted-foreground">{item.new_job_id}</span>
-                              ) : null}
                             </>
                           ) : item.new_job_id ? (
                             <span className="font-mono text-xs text-muted-foreground">{item.new_job_id}</span>
@@ -481,14 +496,13 @@ function DlqPanel() {
                         </div>
                       </td>
                     </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

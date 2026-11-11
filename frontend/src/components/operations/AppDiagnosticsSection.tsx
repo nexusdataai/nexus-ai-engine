@@ -1,10 +1,13 @@
 import { useState } from "react";
-import { Play, RefreshCw, Server, Wrench } from "lucide-react";
 
+import { Icon } from "@/components/ds/Icon";
+import { CodeBlock, Panel, StatusPill } from "@/components/ds/kit";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { api, apiFetch } from "@/services/api";
 import type { WorkersSummary } from "@/types/api";
+
+import { SectionHeader } from "./parts";
 
 const REST_PATHS = [
   "/health",
@@ -14,6 +17,14 @@ const REST_PATHS = [
   "/api/v1/stages/registered",
   "/api/v1/monitoring/slas",
 ];
+
+function RunIcon({ busy }: { busy: boolean }) {
+  return <Icon name={busy ? "refresh" : "play"} className={busy ? "animate-spin" : undefined} />;
+}
+
+function Hint({ children }: { children: string }) {
+  return <p className="mb-3 text-sm text-muted-foreground">{children}</p>;
+}
 
 export function AppDiagnosticsSection() {
   const [healthOut, setHealthOut] = useState("Waiting for connection test...");
@@ -82,102 +93,110 @@ export function AppDiagnosticsSection() {
   };
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h3 className="text-lg font-semibold">Backend Debug Platform</h3>
-        <p className="text-sm text-muted-foreground">
-          Test this ai-engine API, registered stages, and job workers. Call-processing MCP/QA tools are not part of this engine.
-        </p>
-        <div className="mt-2 flex items-center gap-2 text-sm">
-          <span className={`h-2 w-2 rounded-full ${connected === "connected" ? "bg-green-500" : connected === "error" ? "bg-red-500" : "bg-muted-foreground"}`} />
-          {connected === "connected" ? "Connected" : connected === "error" ? "Disconnected" : "Not tested"}
-        </div>
-      </div>
+    <div className="space-y-6">
+      <SectionHeader
+        title="Backend Debug Platform"
+        description="Test this ai-engine API, registered stages, and job workers. Call-processing MCP/QA tools are not part of this engine."
+        meta={
+          <StatusPill
+            variant="soft"
+            tone={connected === "connected" ? "success" : connected === "error" ? "danger" : "neutral"}
+          >
+            {connected === "connected" ? "Connected" : connected === "error" ? "Disconnected" : "Not tested"}
+          </StatusPill>
+        }
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Server className="h-4 w-4" />
-              Connection Testing
-            </CardTitle>
-            <CardDescription>Hits /health and /readiness on this backend.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Panel
+          title="Connection Testing"
+          actions={
             <Button size="sm" onClick={testConnection} disabled={busy === "health"}>
-              {busy === "health" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              <RunIcon busy={busy === "health"} />
               Test Connection
             </Button>
-            <pre className="p-3 bg-muted rounded-lg text-xs overflow-auto max-h-40 font-mono whitespace-pre-wrap">{healthOut}</pre>
-          </CardContent>
-        </Card>
+          }
+        >
+          <Hint>Hits /health and /readiness on this backend.</Hint>
+          <CodeBlock wrap maxHeight={200}>{healthOut}</CodeBlock>
+        </Panel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Wrench className="h-4 w-4" />
-              Registered stages
-            </CardTitle>
-            <CardDescription>Stage classes this engine can execute.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button size="sm" onClick={loadStages} disabled={busy === "stages"}>
-              {busy === "stages" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+        <Panel
+          title="Registered stages"
+          actions={
+            <Button size="sm" variant="outline" onClick={loadStages} disabled={busy === "stages"}>
+              <RunIcon busy={busy === "stages"} />
               List Stages
             </Button>
-            <pre className="p-3 bg-muted rounded-lg text-xs overflow-auto max-h-40 font-mono whitespace-pre-wrap">{stagesOut}</pre>
-          </CardContent>
-        </Card>
+          }
+        >
+          <Hint>Stage classes this engine can execute.</Hint>
+          <CodeBlock wrap maxHeight={200}>{stagesOut}</CodeBlock>
+        </Panel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">REST API Testing</CardTitle>
-            <CardDescription>Execute a request against this engine. /api/* uses the current session.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex flex-wrap gap-1">
+        <Panel
+          title="REST API Testing"
+          actions={
+            <Button size="sm" variant="outline" onClick={executeApi} disabled={busy === "api"}>
+              <RunIcon busy={busy === "api"} />
+              Execute API
+            </Button>
+          }
+        >
+          <Hint>Execute a request against this engine. /api/* uses the current session.</Hint>
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <select
+                className="field field-sm w-24 shrink-0"
+                value={apiMethod}
+                onChange={(e) => setApiMethod(e.target.value as "GET" | "POST")}
+              >
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+              </select>
+              <input className="field field-sm min-w-0 flex-1 font-mono" value={apiPath} onChange={(e) => setApiPath(e.target.value)} />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
               {REST_PATHS.map((path) => (
                 <button
                   key={path}
                   type="button"
-                  className="text-xs rounded border px-2 py-1 text-muted-foreground hover:text-foreground"
+                  className={cn(
+                    "rounded-md border px-2 py-1 font-mono text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    apiPath === path
+                      ? "border-border-strong bg-accent text-foreground"
+                      : "border-border text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                  )}
                   onClick={() => setApiPath(path)}
                 >
                   {path}
                 </button>
               ))}
             </div>
-            <div className="flex gap-2">
-              <select className="h-8 rounded-md border bg-background px-2 text-xs" value={apiMethod} onChange={(e) => setApiMethod(e.target.value as "GET" | "POST")}>
-                <option value="GET">GET</option>
-                <option value="POST">POST</option>
-              </select>
-              <input className="h-8 flex-1 rounded-md border bg-background px-2 text-xs" value={apiPath} onChange={(e) => setApiPath(e.target.value)} />
-            </div>
             {apiMethod === "POST" ? (
-              <textarea className="w-full min-h-[72px] rounded-md border bg-background p-2 text-xs font-mono" value={apiBody} onChange={(e) => setApiBody(e.target.value)} placeholder="{}" />
+              <textarea
+                className="field min-h-[72px] font-mono text-xs"
+                value={apiBody}
+                onChange={(e) => setApiBody(e.target.value)}
+                placeholder="{}"
+              />
             ) : null}
-            <Button size="sm" onClick={executeApi} disabled={busy === "api"}>
-              {busy === "api" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              Execute API
-            </Button>
-            <pre className="p-3 bg-muted rounded-lg text-xs overflow-auto max-h-40 font-mono whitespace-pre-wrap">{apiOut}</pre>
-          </CardContent>
-        </Card>
+            <CodeBlock wrap maxHeight={200}>{apiOut}</CodeBlock>
+          </div>
+        </Panel>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Job worker pool</CardTitle>
-            <CardDescription>Queue consumers and deployment replicas for this engine.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Button size="sm" onClick={loadWorkers} disabled={busy === "workers"}>
-              {busy === "workers" ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+        <Panel
+          title="Job worker pool"
+          actions={
+            <Button size="sm" variant="outline" onClick={loadWorkers} disabled={busy === "workers"}>
+              <RunIcon busy={busy === "workers"} />
               Get Worker Stats
             </Button>
-            <pre className="p-3 bg-muted rounded-lg text-xs overflow-auto max-h-40 font-mono whitespace-pre-wrap">{workerOut}</pre>
-          </CardContent>
-        </Card>
+          }
+        >
+          <Hint>Queue consumers and deployment replicas for this engine.</Hint>
+          <CodeBlock wrap maxHeight={200}>{workerOut}</CodeBlock>
+        </Panel>
       </div>
     </div>
   );

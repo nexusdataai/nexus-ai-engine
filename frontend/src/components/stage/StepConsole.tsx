@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Icon } from "@/components/ds/Icon";
+import { Segmented, StatusPill } from "@/components/ds/kit";
 import { cn } from "@/lib/utils";
 import type { LogEntry, StepStatus } from "@/types/stageJobStream";
 
@@ -25,6 +27,14 @@ type Props = {
   variant?: "inline" | "panel";
 };
 
+const LEVELS = [
+  { value: "all", label: "All" },
+  { value: "info", label: "Info" },
+  { value: "warn", label: "Warn" },
+  { value: "error", label: "Error" },
+] as const;
+
+/** Log output of one step. Follows the tail until the reader scrolls up. */
 export function StepConsole({
   stepName,
   status,
@@ -62,79 +72,68 @@ export function StepConsole({
   return (
     <div
       className={cn(
-        "rounded-md border border-border bg-zinc-950/80 overflow-hidden flex flex-col",
-        variant === "inline" ? "mt-2" : "h-full min-h-[420px]",
+        "relative flex flex-col overflow-hidden",
+        variant === "inline" ? "mt-2 rounded-lg border border-border" : "h-full min-h-[420px]",
       )}
     >
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-border/60 bg-zinc-900/50">
-        <div className="flex items-center gap-2 text-xs">
-          <span
-            className={cn(
-              "h-2 w-2 rounded-full",
-              status === "running" && "bg-blue-400 animate-pulse",
-              status === "completed" && "bg-emerald-400",
-              status === "failed" && "bg-red-400",
-              status === "pending" && "bg-muted-foreground",
-            )}
-          />
-          <span className="font-medium">{stepName}</span>
-          <span className="text-muted-foreground">{logs.length} lines</span>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
+        <div className="flex min-w-0 items-center gap-3 text-sm">
+          <StatusPill status={status} />
+          {variant === "inline" ? <span className="truncate font-medium text-foreground">{stepName}</span> : null}
+          <span className="num shrink-0 text-xs text-muted-foreground">{logs.length} lines</span>
         </div>
-        <div className="flex gap-1">
-          {(["all", "info", "warn", "error"] as const).map((lv) => (
-            <button
-              key={lv}
-              type="button"
-              className={cn(
-                "px-2 py-0.5 rounded text-[10px] uppercase tracking-wide",
-                levelFilter === lv ? "bg-primary/20 text-primary" : "text-muted-foreground hover:bg-accent",
-              )}
-              onClick={() => onLevelFilterChange(lv)}
-            >
-              {lv}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          label="Log level"
+          value={(levelFilter || "all") as (typeof LEVELS)[number]["value"]}
+          onChange={onLevelFilterChange}
+          options={LEVELS.map((l) => ({ value: l.value, label: l.label }))}
+        />
       </div>
       <div
         ref={scrollRef}
         onScroll={onScroll}
         className={cn(
-          "overflow-y-auto p-3 font-mono text-[11px] leading-relaxed flex-1",
+          "scroll-thin flex-1 overflow-y-auto bg-background p-4 font-mono text-xs leading-5",
           variant === "inline" ? "max-h-48" : "min-h-0",
         )}
         data-testid="step-console"
       >
         {filtered.length === 0 ? (
-          <p className="text-muted-foreground">Waiting for output…</p>
+          <p className="font-sans text-sm text-subtle-foreground">Waiting for output…</p>
         ) : (
-          filtered.map((line, i) => (
-            <div key={`${line.timestamp}-${i}`} className="whitespace-pre-wrap break-all">
-              <span className="text-muted-foreground">{fmtTime(line.timestamp)}</span>{" "}
-              <span
-                className={cn(
-                  normalizeLevel(line.level) === "error" && "text-red-400",
-                  normalizeLevel(line.level) === "warn" && "text-amber-400",
-                  normalizeLevel(line.level) === "info" && "text-blue-300",
-                )}
-              >
-                [{line.level.toUpperCase()}]
-              </span>{" "}
-              {line.message}
-            </div>
-          ))
+          filtered.map((line, i) => {
+            const lv = normalizeLevel(line.level);
+            return (
+              <div key={`${line.timestamp}-${i}`} className="flex gap-3 whitespace-pre-wrap break-all">
+                <span className="num shrink-0 select-none text-subtle-foreground">{fmtTime(line.timestamp)}</span>
+                <span
+                  className={cn(
+                    "w-[52px] shrink-0 select-none",
+                    lv === "error" && "text-destructive",
+                    (lv === "warn" || lv === "warning") && "text-warning",
+                    lv === "info" && "text-primary dark:text-brand-hi",
+                    lv === "debug" && "text-subtle-foreground",
+                  )}
+                >
+                  {line.level.toUpperCase()}
+                </span>
+                <span className={cn("min-w-0 text-foreground", lv === "error" && "text-destructive")}>{line.message}</span>
+              </div>
+            );
+          })
         )}
       </div>
       {!followTail && filtered.length > 0 ? (
         <button
           type="button"
-          className="w-full py-1 text-xs text-primary hover:bg-accent border-t border-border/60"
+          className="absolute bottom-3 left-1/2 flex h-7 -translate-x-1/2 items-center gap-1.5 rounded-full border border-border-strong bg-popover px-3 text-xs font-medium text-foreground shadow-md transition-colors hover:bg-accent"
           onClick={() => {
             if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
             setFollowTail(true);
           }}
         >
-          ↓ Jump to latest
+          <Icon name="chevron-down" className="h-3 w-3" />
+          Jump to latest
         </button>
       ) : null}
     </div>

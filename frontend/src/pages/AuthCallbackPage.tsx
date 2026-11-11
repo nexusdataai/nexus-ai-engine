@@ -23,5 +23,5 @@ export function AuthCallbackPage() {
     nav("/", { replace: true });
   }, [nav]);
 
-  return <p className="text-sm text-muted-foreground">Completing sign-in…</p>;
+  return <p className="py-16 text-center text-sm text-muted-foreground">Completing sign-in…</p>;
 }

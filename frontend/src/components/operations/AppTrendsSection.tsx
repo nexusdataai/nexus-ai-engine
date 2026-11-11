@@ -1,10 +1,8 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
 import {
   Bar,
   CartesianGrid,
   ComposedChart,
-  Legend,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -12,31 +10,51 @@ import {
   YAxis,
 } from "recharts";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  CHART_MARGIN,
+  ChartLegend,
+  ChartTooltip,
+  STATUS_COLORS,
+  axisProps,
+  barProps,
+  cursorBand,
+  gridProps,
+  lineProps,
+  seriesColor,
+} from "@/components/ds/charts";
+import { MetricStrip, Panel, Segmented, type ChipOption, type Metric } from "@/components/ds/kit";
 import { api } from "@/services/api";
 import type { AppTrendKpi, AppTrendsTab, AppTrendsWindow } from "@/types/appTrends";
 import { useState } from "react";
 
-const KPI_TINT: Record<string, string> = {
-  active: "border-l-blue-500",
-  submitted: "border-l-violet-500",
-  succeeded: "border-l-green-500",
-  failed: "border-l-red-500",
-  success_rate: "border-l-amber-400",
-  p95: "border-l-sky-500",
-  waiting: "border-l-violet-500",
-  running: "border-l-blue-500",
-  pending: "border-l-slate-400",
-  capacity: "border-l-sky-500",
-  slots: "border-l-indigo-400",
-  lag_pct: "border-l-amber-400",
-  total: "border-l-blue-500",
-  enabled: "border-l-green-500",
-  due_soon: "border-l-violet-500",
-  last_failed: "border-l-red-500",
-  fired: "border-l-sky-500",
+import { ChartBody, MetricStripSkeleton, RefreshButton, SectionHeader, stripColumns } from "./parts";
+
+const WINDOWS: ChipOption<AppTrendsWindow>[] = [
+  { value: "24h", label: "Last 24h" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+];
+
+/** Outcome series keep their status colour; everything else uses the blue scale. */
+const OUTCOME_COLOR: Record<string, string> = {
+  succeeded: STATUS_COLORS.success,
+  success: STATUS_COLORS.success,
+  completed: STATUS_COLORS.success,
+  failed: STATUS_COLORS.danger,
+  last_failed: STATUS_COLORS.danger,
+  error: STATUS_COLORS.danger,
 };
+
+/** Assign one colour per id: status colour for outcomes, otherwise the next series hue. */
+function paletteFor(ids: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  let next = 0;
+  for (const id of ids) {
+    if (out[id]) continue;
+    out[id] = OUTCOME_COLOR[id] ?? seriesColor(next++);
+  }
+  return out;
+}
 
 function formatKpi(kpi: AppTrendKpi): string {
   if (kpi.value == null) return "—";
@@ -67,165 +85,142 @@ export function AppTrendsSection({ tab }: { tab: AppTrendsTab }) {
     time: formatTick(p.timestamp, data?.grain),
     rate: p.rate ?? null,
   }));
-  const mixTotal = (data?.mix ?? []).reduce((n, m) => n + (m.value || 0), 0);
+  const mix = data?.mix ?? [];
+  const mixTotal = mix.reduce((n, m) => n + (m.value || 0), 0);
   const countSeries = (data?.series ?? []).filter((s) => s.axis === "count" && s.id !== "rate");
   const rateSeries = (data?.series ?? []).find((s) => s.axis === "percent");
 
+  const colors = paletteFor([...countSeries.map((s) => s.id), "rate"]);
+  const mixColors = { ...paletteFor(mix.map((m) => m.id)), ...Object.fromEntries(mix.filter((m) => colors[m.id]).map((m) => [m.id, colors[m.id]])) };
+  const showMix = mix.length > 0 && mixTotal > 0;
+
+  const kpis = data?.kpis ?? [];
+  const kpiItems: Metric[] = kpis.map((kpi) => ({
+    label: kpi.label,
+    value: formatKpi(kpi),
+    tone: (kpi.id === "failed" || kpi.id === "last_failed") && Number(kpi.value) > 0 ? "danger" : undefined,
+  }));
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-semibold">
-            {tab === "executions" ? "Executions" : tab === "queue" ? "Queue" : "Schedules"} trends
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            {data?.chart_title ?? "Volume over time with a quality/rate overlay."}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            className="h-8 rounded-md border bg-background px-2 text-xs"
-            value={window}
-            onChange={(e) => setWindow(e.target.value as AppTrendsWindow)}
-            aria-label="Trend window"
-          >
-            <option value="24h">Last 24h</option>
-            <option value="7d">Last 7 days</option>
-            <option value="30d">Last 30 days</option>
-          </select>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            onClick={() => qc.invalidateQueries({ queryKey: ["app-trends", tab, window] })}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <SectionHeader
+        title={<>{tab === "executions" ? "Executions" : tab === "queue" ? "Queue" : "Schedules"} trends</>}
+        description={data?.chart_title ?? "Volume over time with a quality/rate overlay."}
+        actions={
+          <>
+            <Segmented options={WINDOWS} value={window} onChange={setWindow} label="Trend window" />
+            <RefreshButton
+              spinning={isFetching}
+              onClick={() => qc.invalidateQueries({ queryKey: ["app-trends", tab, window] })}
+            >
+              Refresh
+            </RefreshButton>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-        {(isLoading ? Array.from({ length: 6 }).map((_, i) => ({ id: String(i) }) as AppTrendKpi) : data?.kpis ?? []).map(
-          (kpi) => (
-            <Card key={kpi.id} className={`border-l-4 ${KPI_TINT[kpi.id] ?? "border-l-primary"}`}>
-              <CardContent className="p-4">
-                {isLoading ? (
-                  <div className="h-12 animate-pulse rounded bg-muted" />
-                ) : (
-                  <>
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{kpi.label}</div>
-                    <div className="mt-1 text-2xl font-bold">{formatKpi(kpi)}</div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          ),
-        )}
-      </div>
+      {isLoading ? (
+        <MetricStripSkeleton count={6} />
+      ) : kpiItems.length > 0 ? (
+        <MetricStrip items={kpiItems} columns={stripColumns(kpiItems.length)} />
+      ) : null}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">{data?.chart_title ?? "Trend"}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="h-[280px] flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
-          ) : data?.error ? (
-            <div className="h-[280px] flex items-center justify-center text-sm text-red-500">{data.error}</div>
-          ) : points.length === 0 ? (
-            <div className="h-[280px] flex items-center justify-center text-sm text-muted-foreground">
-              No trend data yet for this window.
-            </div>
-          ) : (
+      <div className={showMix ? "grid gap-6 xl:grid-cols-[minmax(0,1fr)_300px]" : undefined}>
+        <Panel title={data?.chart_title ?? "Trend"}>
+          <ChartBody
+            loading={isLoading}
+            error={data?.error}
+            empty={points.length === 0 && "No trend data yet for this window."}
+            height={280}
+          >
             <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart data={points}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis dataKey="time" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                <YAxis yAxisId="count" tick={{ fontSize: 10 }} width={36} />
+              <ComposedChart data={points} margin={CHART_MARGIN}>
+                <CartesianGrid {...gridProps} />
+                <XAxis dataKey="time" {...axisProps} interval="preserveStartEnd" />
+                <YAxis yAxisId="count" {...axisProps} allowDecimals={false} width={40} />
                 <YAxis
                   yAxisId="percent"
                   orientation="right"
                   domain={[0, 100]}
-                  tick={{ fontSize: 10 }}
+                  {...axisProps}
                   tickFormatter={(v) => `${v}%`}
-                  width={40}
+                  width={44}
                 />
                 <Tooltip
-                  content={({ payload, label }) => {
-                    if (!payload?.length) return null;
-                    return (
-                      <div className="bg-background border rounded p-2 text-xs shadow space-y-1">
-                        <div className="font-medium">{label}</div>
-                        {payload.map((item) => (
-                          <div key={String(item.dataKey)} style={{ color: String(item.color) }}>
-                            {item.name}: {item.value}
-                            {item.dataKey === "rate" ? "%" : ""}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }}
+                  cursor={cursorBand}
+                  content={
+                    <ChartTooltip
+                      valueFormatter={(value, name) =>
+                        value == null ? "—" : `${value}${rateSeries && name === rateSeries.label ? "%" : ""}`
+                      }
+                    />
+                  }
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                {countSeries.map((s) => (
+                {countSeries.map((s, i) => (
                   <Bar
                     key={s.id}
                     yAxisId="count"
                     dataKey={s.id}
                     name={s.label}
                     stackId="volume"
-                    fill={s.color}
+                    fill={colors[s.id]}
+                    {...barProps}
+                    radius={i === countSeries.length - 1 ? barProps.radius : 0}
                     maxBarSize={28}
                   />
                 ))}
                 {rateSeries ? (
                   <Line
                     yAxisId="percent"
-                    type="monotone"
                     dataKey="rate"
                     name={rateSeries.label}
-                    stroke={rateSeries.color}
-                    strokeWidth={2}
-                    dot={false}
+                    stroke={colors.rate}
+                    {...lineProps}
                     connectNulls
                   />
                 ) : null}
               </ComposedChart>
             </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
+            <ChartLegend
+              className="mt-3"
+              items={[
+                ...countSeries.map((s) => ({ label: s.label, color: colors[s.id] })),
+                ...(rateSeries ? [{ label: `${rateSeries.label} (right axis)`, color: colors.rate }] : []),
+              ]}
+            />
+          </ChartBody>
+        </Panel>
 
-      {data?.mix && mixTotal > 0 ? (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Mix</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <div className="flex h-3 w-full overflow-hidden rounded-full">
-              {data.mix.map((m) => (
+        {showMix ? (
+          <Panel title="Mix">
+            <div className="flex h-2 w-full gap-0.5 overflow-hidden rounded-full">
+              {mix.map((m) => (
                 <div
                   key={m.id}
                   style={{
                     width: `${Math.max(0, (m.value / mixTotal) * 100)}%`,
-                    backgroundColor: m.color,
+                    backgroundColor: mixColors[m.id],
                   }}
                   title={`${m.label}: ${m.value}`}
                 />
               ))}
             </div>
-            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-              {data.mix.map((m) => (
-                <span key={m.id} className="inline-flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: m.color }} />
-                  {m.label} {((m.value / mixTotal) * 100).toFixed(0)}%
-                </span>
+            <ul className="mt-4">
+              {mix.map((m) => (
+                <li key={m.id} className="flex items-center justify-between gap-3 border-b border-border py-2 text-sm last:border-b-0">
+                  <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
+                    <span className="h-2 w-2 shrink-0 rounded-[2px]" style={{ backgroundColor: mixColors[m.id] }} aria-hidden="true" />
+                    <span className="truncate">
+                      {m.label} {((m.value / mixTotal) * 100).toFixed(0)}%
+                    </span>
+                  </span>
+                  <span className="num shrink-0 font-medium text-foreground">{m.value}</span>
+                </li>
               ))}
-            </div>
-          </CardContent>
-        </Card>
-      ) : null}
+            </ul>
+          </Panel>
+        ) : null}
+      </div>
     </div>
   );
 }

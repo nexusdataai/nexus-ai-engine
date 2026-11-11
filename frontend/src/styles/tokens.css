@@ -1,0 +1,185 @@
+/*
+ * Nexus AI design tokens
+ * ----------------------------------------------------------------------------
+ * Single source of truth for colour, type, radius, elevation and motion.
+ * Values mirror the Nexus AI website (graphite + blue, Geist).
+ *
+ * Rules:
+ *  - Components never hard-code a hex colour. Use the Tailwind classes that map
+ *    to these variables (bg-card, text-muted-foreground, border-border,
+ *    bg-primary, text-success ...). See doc/design-system/README.md.
+ *  - Colour variables are HSL triplets ("H S% L%") so Tailwind opacity
+ *    modifiers work: bg-primary/10, border-success/30.
+ *  - :root is the light theme, .dark is the graphite theme (default).
+ */
+
+:root {
+  /* ---- surfaces ---- */
+  --background: 60 10% 94%;          /* #f2f2ef page */
+  --foreground: 220 14% 8%;          /* #121418 */
+  --card: 0 0% 100%;                 /* raised surface */
+  --card-foreground: 220 14% 8%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 220 14% 8%;
+  --surface-2: 60 8% 96%;            /* inset / subtle fill */
+  --surface-3: 60 7% 91%;            /* hover / pressed fill */
+
+  /* ---- text ---- */
+  --muted: 60 7% 91%;
+  --muted-foreground: 216 8% 36%;    /* secondary text, AA on page + card */
+  --subtle-foreground: 216 6% 42%;   /* tertiary text, AA (4.5:1) on page and card */
+
+  /* ---- brand ---- */
+  --primary: 224 76% 52%;            /* blue, AA with white text on light */
+  --primary-foreground: 0 0% 100%;
+  --brand: 223 100% 62%;             /* #3d73ff exact brand blue */
+  --brand-hi: 223 100% 76%;          /* #86a8ff */
+  --brand-lo: 224 69% 50%;           /* #2756d6 */
+
+  /* ---- neutral interactive ---- */
+  --secondary: 60 7% 91%;
+  --secondary-foreground: 220 14% 8%;
+  --accent: 60 7% 90%;               /* hover fill for ghost controls */
+  --accent-foreground: 220 14% 8%;
+
+  /* ---- lines ---- */
+  --border: 60 8% 86%;               /* #deded8 */
+  --border-strong: 60 6% 79%;        /* #cfcfc8 */
+  --input: 60 6% 79%;
+  --ring: 223 100% 62%;
+
+  /* ---- status ---- */
+  --success: 154 65% 27%;          /* AA as small text on the page */
+  --success-foreground: 0 0% 100%;
+  --warning: 32 92% 31%;          /* AA as small text on the page */
+  --warning-foreground: 0 0% 100%;
+  --destructive: 354 70% 43%;
+  --destructive-foreground: 0 0% 100%;
+  --info: 224 76% 52%;
+  --info-foreground: 0 0% 100%;
+
+  /* ---- sidebar ---- */
+  --sidebar: 60 9% 96%;
+  --sidebar-fg: 216 8% 30%;
+  --sidebar-border: 60 8% 86%;
+  --header: 60 10% 94%;
+
+  /* ---- data visualisation (categorical, ordered) ---- */
+  --chart-1: 224 76% 52%;            /* blue (first series) */
+  --chart-2: 223 90% 72%;            /* light blue (second series) */
+  --chart-3: 220 10% 56%;            /* slate (third series / "other") */
+  --chart-4: 174 65% 34%;            /* teal */
+  --chart-5: 32 85% 46%;             /* amber */
+  --chart-6: 262 50% 58%;            /* violet */
+  --chart-grid: 60 8% 86%;
+  --plane-on: 223 100% 96%;          /* highlighted plane in diagrams */
+  --plane: 0 0% 100%;                /* plane surface */
+  --plane-line: 60 5% 68%;           /* plane outline */
+  --chart-axis: 216 8% 36%;
+
+  /* legacy chart aliases (kept so older charts pick up the new palette) */
+  --chart-primary: hsl(var(--chart-1));
+  --chart-secondary: hsl(var(--chart-2));
+  --chart-accent: hsl(var(--chart-3));
+  --chart-success: hsl(var(--chart-5));
+  --chart-tooltip-bg: hsl(var(--popover));
+  --chart-tooltip-border: hsl(var(--border));
+
+  /* ---- shape ---- */
+  --radius: 0.5rem;                  /* 8px. md = 6px, sm = 4px, xl = 12px */
+
+  /* ---- elevation ---- */
+  --shadow-xs: 0 1px 2px rgba(18, 20, 24, 0.06);
+  --shadow-sm: 0 2px 8px -2px rgba(18, 20, 24, 0.10);
+  --shadow-md: 0 12px 28px -12px rgba(18, 20, 24, 0.22);
+  --shadow-lg: 0 30px 60px -30px rgba(18, 20, 24, 0.35);
+
+  /* ---- type ---- */
+  --font-sans: "Geist Variable", "Geist", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  /* ---- motion ---- */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 420ms;
+
+  /* ---- layout ---- */
+  --sidebar-w: 232px;
+  --sidebar-w-mini: 60px;
+  --topbar-h: 52px;
+  --pagebar-h: 41px;                 /* PageTabsBar: compact title + line tabs on one row */
+  --subbar-h: 41px;                  /* PageTabsBar segment row */
+  --tabbar-h: 0px;
+
+  color-scheme: light;
+}
+
+@media (min-width: 768px) {
+  :root { --tabbar-h: 0px; }
+}
+
+.dark {
+  --background: 225 13% 6%;          /* #0d0e11 */
+  --foreground: 220 19% 94%;         /* #eceef2 */
+  --card: 223 15% 9%;                /* #14161b */
+  --card-foreground: 220 19% 94%;
+  --popover: 222 16% 11%;
+  --popover-foreground: 220 19% 94%;
+  --surface-2: 222 16% 13%;          /* #1b1e25 */
+  --surface-3: 222 15% 17%;          /* #262a33 */
+
+  --muted: 222 16% 13%;
+  --muted-foreground: 221 10% 64%;   /* #9aa0ad */
+  --subtle-foreground: 221 8% 54%;   /* AA (4.5:1) on page and card */
+
+  --primary: 223 100% 58%;           /* #2965ff: fills under white text reach AA; the brand blue stays in --brand */
+  --primary-foreground: 0 0% 100%;
+  --brand: 223 100% 62%;
+  --brand-hi: 223 100% 76%;
+  --brand-lo: 224 69% 50%;
+
+  --secondary: 222 16% 13%;
+  --secondary-foreground: 220 19% 94%;
+  --accent: 222 15% 17%;
+  --accent-foreground: 220 19% 94%;
+
+  --border: 225 8% 15%;              /* white @ 8.5% on graphite */
+  --border-strong: 225 7% 22%;       /* white @ 16% on graphite */
+  --input: 225 7% 22%;
+  --ring: 223 100% 62%;
+
+  --success: 152 60% 46%;
+  --success-foreground: 152 80% 6%;
+  --warning: 36 92% 55%;
+  --warning-foreground: 36 90% 8%;
+  --destructive: 354 78% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --info: 223 100% 70%;
+  --info-foreground: 225 13% 6%;
+
+  --sidebar: 225 14% 5%;
+  --sidebar-fg: 221 10% 64%;
+  --sidebar-border: 225 8% 13%;
+  --header: 225 13% 6%;
+
+  --chart-1: 223 100% 66%;
+  --chart-2: 223 100% 84%;
+  --chart-3: 221 14% 56%;
+  --chart-4: 174 52% 52%;
+  --chart-5: 36 82% 60%;
+  --chart-6: 262 70% 76%;
+  --chart-grid: 225 8% 17%;
+  --plane-on: 223 62% 15%;
+  --plane: 222 16% 14%;
+  --plane-line: 222 10% 34%;
+  --chart-axis: 221 10% 64%;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 2px 10px -2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 16px 36px -14px rgba(0, 0, 0, 0.7);
+  --shadow-lg: 0 34px 70px -30px rgba(0, 0, 0, 0.85);
+
+  color-scheme: dark;
+}

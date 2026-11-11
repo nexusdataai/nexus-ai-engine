@@ -1,15 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { StepConsole } from "@/components/stage/StepConsole";
 import { WorkflowTree, type SelectedStep } from "@/components/stage/WorkflowTree";
-import { EmptyState } from "@/components/EmptyState";
-import { StatusBadge } from "@/components/StatusBadge";
-import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/ds/Icon";
+import { EmptyState, KeyValues, Meter, PageHeader, SkeletonRows, StatusPill, TableShell, toneOf, type Tone } from "@/components/ds/kit";
 import { STEP_PENDING, useJourneyJobStream } from "@/hooks/useJourneyJobStream";
-import { cn } from "@/lib/utils";
+import { relativeTime } from "@/utils/time";
 import { api } from "@/services/api";
 import type { LogEntry, StepStatus } from "@/types/stageJobStream";
 
@@ -39,8 +37,10 @@ export function StageJobDetailPage() {
     refetchInterval: 3_000,
   });
 
-  const job = jobQuery.data;
   const journey = journeyQuery.data;
+  // Some engines answer 404 for the single-job endpoint even though the job is
+  // in the journey's job list; fall back to that record so the page still opens.
+  const job = jobQuery.data ?? journey?.jobs.find((j) => j.id === jobId);
 
   const stages = useMemo(() => {
     if (!journey) return [];
@@ -204,113 +204,137 @@ export function StageJobDetailPage() {
       ? `Journey run (${resolvedStageIds?.length ?? stages.length} stages)`
       : (job?.stageName ?? job?.stageId ?? "Stage job");
 
+  const back = (
+    <Link to={`/journeys/${journeyId}`} className="inline-flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground">
+      <Icon name="chevron-left" className="h-3.5 w-3.5" />
+      Back to journey
+    </Link>
+  );
+
+  if (jobQuery.isLoading || (!job && journeyQuery.isLoading)) {
+    return (
+      <div className="space-y-5">
+        <div className="text-sm">{back}</div>
+        <TableShell>
+          <SkeletonRows rows={8} />
+        </TableShell>
+      </div>
+    );
+  }
+  if (!job) {
+    return (
+      <div className="space-y-5">
+        <div className="text-sm">{back}</div>
+        <EmptyState icon="play" title="Job not found" description={String(jobQuery.error ?? "Unknown job")} />
+      </div>
+    );
+  }
+
+  const sseLabel = terminal ? "finished" : stream.sseStatus;
+  const sseTone: Record<string, Tone> = { connected: "success", connecting: "warning", disconnected: "danger", idle: "neutral", finished: "neutral" };
+  const jobTone = toneOf(job.status);
+
   return (
-    <div className="space-y-4">
-      <Button variant="ghost" size="sm" asChild className="-ml-2">
-        <Link to={`/journeys/${journeyId}`}>
-          <ArrowLeft className="h-4 w-4" />
-          Back to journey
-        </Link>
-      </Button>
+    <div className="space-y-5">
+      <PageHeader
+        back={back}
+        title={<span className="font-mono text-lg">{job.id}</span>}
+        description={
+          <>
+            {scopeLabel} ·{" "}
+            <Link to={`/journeys/${journeyId}`} className="link">
+              {journey?.name ?? journeyId}
+            </Link>
+          </>
+        }
+        meta={
+          <>
+            <StatusPill status={job.status} variant="soft" />
+            <StatusPill tone={sseTone[sseLabel] ?? "neutral"} live={sseLabel === "connected"} data-testid="sse-status" className="font-normal text-muted-foreground">
+              SSE: {sseLabel}
+            </StatusPill>
+          </>
+        }
+      />
 
-      {jobQuery.isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading job…</p>
-      ) : jobQuery.error || !job ? (
-        <EmptyState title="Job not found" description={String(jobQuery.error ?? "Unknown job")} />
+      <div className="grid gap-x-10 gap-y-4 rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+        <div>
+          <div className="flex items-baseline justify-between gap-3">
+            <span className="text-sm text-muted-foreground">Progress</span>
+            <span className="num text-2xl font-medium tracking-tight text-foreground">{Math.round(job.progress)}%</span>
+          </div>
+          <Meter value={job.progress} tone={jobTone === "danger" ? "danger" : jobTone === "success" ? "success" : "info"} className="mt-2" label="Job progress" />
+        </div>
+        <KeyValues
+          columns={2}
+          items={[
+            { label: "Started", value: job.startedAt ? <span title={job.startedAt}>{relativeTime(job.startedAt)}</span> : "—" },
+            { label: "Duration", value: job.duration ?? "—" },
+            { label: "Triggered by", value: job.triggeredBy ?? "—" },
+            { label: "Stages", value: stages.length },
+          ]}
+        />
+      </div>
+
+      {stages.length === 0 ? (
+        <EmptyState icon="workflow" title="No stages" description="No stage metadata found for this job." />
       ) : (
-        <>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold font-mono">{job.id}</h2>
-              <p className="text-sm text-muted-foreground">
-                {scopeLabel} · {journey?.name ?? journeyId}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <StatusBadge status={job.status} />
-              <span
-                className={cn(
-                  "text-xs px-2 py-0.5 rounded-full border",
-                  stream.sseStatus === "connected" && "border-emerald-500/50 text-emerald-400",
-                  stream.sseStatus === "connecting" && "border-amber-500/50 text-amber-400",
-                  stream.sseStatus === "idle" && terminal && "border-border text-muted-foreground",
-                )}
-                data-testid="sse-status"
-              >
-                SSE: {terminal ? "finished" : stream.sseStatus}
-              </span>
-            </div>
-          </div>
+        <div className="grid gap-4 lg:grid-cols-[minmax(260px,340px)_minmax(0,1fr)] lg:items-stretch">
+          <WorkflowTree
+            stages={stages}
+            stageStatus={stageStatus}
+            stepStatus={stepStatusFn}
+            logCount={logCountFn}
+            expandedStages={expandedStages}
+            selectedStep={selectedStep}
+            onToggleStage={(stageId) =>
+              setExpandedStages((prev) => ({ ...prev, [stageId]: !prev[stageId] }))
+            }
+            onSelectStep={(stageId, stepId) => {
+              userPickedStep.current = true;
+              setSelectedStep({ stageId, stepId });
+              void loadHistoricalStepLogs(stageId, stepId);
+            }}
+          />
 
-          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{Math.round(job.progress)}% progress</span>
-            <span>Started {job.startedAt ?? "—"}</span>
-            <span>Duration {job.duration ?? "—"}</span>
-          </div>
-
-          {stages.length === 0 ? (
-            <EmptyState title="No stages" description="No stage metadata found for this job." />
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-[minmax(260px,340px)_1fr] lg:items-start">
-              <WorkflowTree
-                stages={stages}
-                stageStatus={stageStatus}
-                stepStatus={stepStatusFn}
-                logCount={logCountFn}
-                expandedStages={expandedStages}
-                selectedStep={selectedStep}
-                onToggleStage={(stageId) =>
-                  setExpandedStages((prev) => ({ ...prev, [stageId]: !prev[stageId] }))
-                }
-                onSelectStep={(stageId, stepId) => {
-                  userPickedStep.current = true;
-                  setSelectedStep({ stageId, stepId });
-                  void loadHistoricalStepLogs(stageId, stepId);
-                }}
-              />
-
-              <div className="rounded-md border border-border bg-card overflow-hidden min-h-[420px] flex flex-col">
-                {selectedStepMeta ? (
-                  <>
-                    <div className="px-4 py-3 border-b border-border bg-muted/20">
-                      <p className="text-sm font-medium">{selectedStepMeta.step.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {selectedStepMeta.stage.name}
-                        {selectedStepMeta.step.description ? ` · ${selectedStepMeta.step.description}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex-1 p-3 min-h-0">
-                      <StepConsole
-                        key={stepKey(selectedStepMeta.stage.id, selectedStepMeta.step.id)}
-                        stepId={selectedStepMeta.step.id}
-                        stepName={selectedStepMeta.step.name}
-                        status={selectedStepStatus}
-                        logs={selectedLogs}
-                        levelFilter={
-                          selectedStep
-                            ? stream.levelFilter[stepKey(selectedStep.stageId, selectedStep.stepId)] ?? "all"
-                            : "all"
-                        }
-                        onLevelFilterChange={(lv) => {
-                          if (!selectedStep) return;
-                          stream.setLevelFilter((prev) => ({
-                            ...prev,
-                            [stepKey(selectedStep.stageId, selectedStep.stepId)]: lv,
-                          }));
-                        }}
-                        variant="panel"
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground">
-                    Select a step to view logs
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </>
+          <section className="flex min-h-[460px] min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xs">
+            {selectedStepMeta ? (
+              <>
+                <header className="flex min-h-[52px] flex-col justify-center border-b border-border px-4 py-2 sm:px-5">
+                  <h3 className="truncate text-md font-medium text-foreground">{selectedStepMeta.step.name}</h3>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {selectedStepMeta.stage.name}
+                    {selectedStepMeta.step.description ? ` · ${selectedStepMeta.step.description}` : ""}
+                  </p>
+                </header>
+                <div className="min-h-0 flex-1">
+                  <StepConsole
+                    key={stepKey(selectedStepMeta.stage.id, selectedStepMeta.step.id)}
+                    stepId={selectedStepMeta.step.id}
+                    stepName={selectedStepMeta.step.name}
+                    status={selectedStepStatus}
+                    logs={selectedLogs}
+                    levelFilter={
+                      selectedStep
+                        ? stream.levelFilter[stepKey(selectedStep.stageId, selectedStep.stepId)] ?? "all"
+                        : "all"
+                    }
+                    onLevelFilterChange={(lv) => {
+                      if (!selectedStep) return;
+                      stream.setLevelFilter((prev) => ({
+                        ...prev,
+                        [stepKey(selectedStep.stageId, selectedStep.stepId)]: lv,
+                      }));
+                    }}
+                    variant="panel"
+                  />
+                </div>
+              </>
+            ) : (
+              <EmptyState bare icon="terminal" className="flex-1" title="Step logs" description="Select a step to view logs" />
+            )}
+          </section>
+        </div>
       )}
     </div>
   );

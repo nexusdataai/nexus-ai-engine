@@ -1,245 +1,127 @@
 import { useQuery } from "@tanstack/react-query";
-import { Activity, Calendar, ChevronLeft, ChevronRight, CircleHelp, LayoutDashboard, Layers, PlayCircle, Route, Settings, Users, Wrench, X } from "lucide-react";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
-import { NexusLogo } from "@/components/NexusLogo";
+import { Icon } from "@/components/ds/Icon";
+import { KeyValues, Modal, SkeletonRows } from "@/components/ds/kit";
+import { Logo } from "@/components/ds/Logo";
 import { useSidebarChrome } from "@/components/SidebarChrome";
-import { Button } from "@/components/ui/button";
+import { NAV_GROUPS, NAV_ITEMS, SETTINGS_ITEM, activePath, type NavItem } from "@/config/navigation";
 import { cn } from "@/lib/utils";
 import { api } from "@/services/api";
 
-export const NAV_ITEMS = [
-  { id: "dashboard", name: "Dashboard", icon: LayoutDashboard, path: "/" },
-  { id: "executions", name: "Executions", icon: PlayCircle, path: "/executions" },
-  { id: "queue", name: "Queue", icon: Layers, path: "/queue" },
-  { id: "workers", name: "Workers", icon: Users, path: "/workers" },
-  { id: "journeys", name: "Journeys", icon: Route, path: "/journeys" },
-  { id: "schedules", name: "Schedules", icon: Calendar, path: "/schedules" },
-  { id: "tools", name: "Tools", icon: Wrench, path: "/tools" },
-  { id: "operations", name: "Operations", icon: Activity, path: "/operations" },
-] as const;
+export { NAV_ITEMS, activePath };
 
-export function activePath(pathname: string, path: string): boolean {
-  if (path === "/") return pathname === "/";
-  return pathname === path || pathname.startsWith(`${path}/`);
-}
+const rowBase =
+  "group flex h-8 w-full items-center rounded-md text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const rowIdle = "text-sidebar-foreground hover:bg-accent/70 hover:text-foreground";
+const rowActive = "bg-accent font-medium text-foreground";
 
-type SidebarPanelProps = {
-  mini: boolean;
+type SidebarNavProps = {
+  /** Icon-only rail. */
+  mini?: boolean;
   onNavigate: (path: string) => void;
-  onCollapse: () => void;
-  onExpand: () => void;
-  onCloseMobile?: () => void;
-  showMobileClose?: boolean;
 };
 
-function SidebarPanel({
-  mini,
-  onNavigate,
-  onCollapse,
-  onExpand,
-  onCloseMobile,
-  showMobileClose,
-}: SidebarPanelProps) {
+/** Navigation content. Rendered inside the desktop rail and the mobile drawer. */
+function SidebarNav({ mini, onNavigate }: SidebarNavProps) {
   const loc = useLocation();
-
-  return (
-    <aside
-      className={cn(
-        "flex flex-col h-full border-r border-border bg-card shrink-0 transition-[width] duration-200",
-        mini ? "w-[56px]" : "w-[220px]",
-      )}
-      aria-label="Main navigation"
-    >
-      <div
-        className={cn(
-          "flex items-center h-12 border-b border-border shrink-0",
-          mini ? "justify-center px-1" : "gap-2 px-3",
-        )}
-      >
-        {mini ? (
-          <button
-            type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Expand sidebar"
-            onClick={onExpand}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        ) : (
-          <>
-            <NexusLogo className="h-7 w-7 shrink-0" />
-            <span className="font-semibold text-sm truncate">Journey Studio</span>
-            {!showMobileClose ? (
-              <button
-                type="button"
-                className="ml-auto hidden md:inline-flex p-1 rounded hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="Collapse sidebar"
-                onClick={onCollapse}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-            ) : null}
-          </>
-        )}
-        {showMobileClose ? (
-          <button
-            type="button"
-            className="ml-auto p-1 rounded hover:bg-accent"
-            aria-label="Close menu"
-            onClick={onCloseMobile}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        ) : null}
-      </div>
-      <nav className="flex-1 overflow-y-auto p-2 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const active = activePath(loc.pathname, item.path);
-          const Icon = item.icon;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => onNavigate(item.path)}
-              title={item.name}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                active ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:bg-accent hover:text-foreground",
-              )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!mini ? <span className="truncate">{item.name}</span> : null}
-            </button>
-          );
-        })}
-      </nav>
-      <SidebarFooter mini={mini} settingsActive={activePath(loc.pathname, "/settings")} onNavigate={onNavigate} />
-      {mini ? (
-        <div className="hidden md:flex shrink-0 border-t border-border p-2 justify-center">
-          <button
-            type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Expand sidebar"
-            onClick={onExpand}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </button>
-        </div>
-      ) : null}
-    </aside>
-  );
-}
-
-function SidebarFooter({
-  mini,
-  settingsActive,
-  onNavigate,
-}: {
-  mini: boolean;
-  settingsActive: boolean;
-  onNavigate: (path: string) => void;
-}) {
-  const [helpOpen, setHelpOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
+  const layout = mini ? "justify-center" : "gap-2.5 px-2";
+  const iconCls = (on: boolean) =>
+    cn(
+      "h-[17px] w-[17px] transition-colors",
+      on ? "text-primary dark:text-brand-hi" : "text-subtle-foreground group-hover:text-foreground",
+    );
+
+  const renderItem = (item: NavItem) => {
+    const on = activePath(loc.pathname, item.path);
+    return (
+      <button
+        key={item.id}
+        type="button"
+        onClick={() => onNavigate(item.path)}
+        title={mini ? item.name : undefined}
+        aria-current={on ? "page" : undefined}
+        aria-label={mini ? item.name : undefined}
+        className={cn(rowBase, layout, on ? rowActive : rowIdle)}
+      >
+        <Icon name={item.icon} className={iconCls(on)} />
+        {!mini && <span className="truncate">{item.name}</span>}
+      </button>
+    );
+  };
+
   return (
-    <div className="relative shrink-0 border-t border-border p-2 space-y-1">
-      <button
-        type="button"
-        onClick={() => onNavigate("/settings")}
-        title="Settings"
-        aria-current={settingsActive ? "page" : undefined}
-        className={cn(
-          "w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-          settingsActive ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground hover:bg-accent hover:text-foreground",
-        )}
-      >
-        <Settings className="h-4 w-4 shrink-0" />
-        {!mini ? <span className="truncate">Settings</span> : null}
-      </button>
-      <button
-        type="button"
-        onClick={() => setHelpOpen((open) => !open)}
-        title="Help"
-        aria-expanded={helpOpen}
-        className="w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-      >
-        <CircleHelp className="h-4 w-4 shrink-0" />
-        {!mini ? <span className="truncate">Help</span> : null}
-      </button>
-      {helpOpen ? (
-        <div className="absolute bottom-12 left-2 z-20 min-w-[160px] rounded-md border bg-background py-1 shadow-lg">
-          <button
-            type="button"
-            className="w-full px-3 py-2 text-left text-sm hover:bg-accent"
-            onClick={() => {
-              setHelpOpen(false);
-              setAboutOpen(true);
-            }}
-          >
-            About
-          </button>
-        </div>
-      ) : null}
-      {aboutOpen ? <AboutDialog onClose={() => setAboutOpen(false)} /> : null}
+    <div className="flex h-full min-h-0 flex-col">
+      <nav aria-label="Main navigation" className={cn("scrollbar-hide min-h-0 flex-1 overflow-y-auto pb-3", mini ? "px-2" : "px-3")}>
+        {NAV_GROUPS.map((group, gi) => (
+          <div key={group.label} className={cn(gi > 0 && "mt-5")}>
+            {mini
+              ? gi > 0 && <div className="mx-1.5 mb-3 border-t border-sidebar-border" />
+              : <div className="eyebrow px-2 pb-1.5">{group.label}</div>}
+            <div className="space-y-px">{group.items.map(renderItem)}</div>
+          </div>
+        ))}
+      </nav>
+
+      <div className={cn("space-y-px border-t border-sidebar-border py-2.5", mini ? "px-2" : "px-3")}>
+        {renderItem(SETTINGS_ITEM)}
+        <button
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          title={mini ? "About" : undefined}
+          aria-label={mini ? "About" : undefined}
+          className={cn(rowBase, layout, rowIdle)}
+        >
+          <Icon name="info" className={iconCls(false)} />
+          {!mini && <span className="truncate">About</span>}
+        </button>
+      </div>
+      <AboutDialog open={aboutOpen} onClose={() => setAboutOpen(false)} />
     </div>
   );
 }
 
-function AboutDialog({ onClose }: { onClose: () => void }) {
+function AboutDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["settings"],
     queryFn: () => api.getSettings(),
+    enabled: open,
   });
   const info = data?.version;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-lg border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b px-6 py-4">
-          <div>
-            <h3 className="text-lg font-semibold">About</h3>
-            <p className="text-sm text-muted-foreground">ai-engine version currently deployed</p>
-          </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            ✕
-          </Button>
-        </div>
-        <div className="space-y-2 px-6 py-4 text-sm">
-          {isLoading ? (
-            <p className="text-muted-foreground">Loading…</p>
-          ) : error ? (
-            <p className="text-red-500">{String(error)}</p>
-          ) : (
-            <>
-              <div>
-                <div className="text-xs text-muted-foreground">Product</div>
-                <div className="font-medium">{info?.name ?? "nexus-ai-engine"}</div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground">Version</div>
-                <div className="font-mono text-base">{info?.version ?? "—"}</div>
-              </div>
-              {info?.env ? (
-                <div>
-                  <div className="text-xs text-muted-foreground">Environment</div>
-                  <div>{info.env}</div>
-                </div>
-              ) : null}
-              {info?.git_sha && info.git_sha !== "unknown" ? (
-                <div>
-                  <div className="text-xs text-muted-foreground">Git</div>
-                  <div className="font-mono text-xs">{info.git_sha}</div>
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
+    <Modal open={open} onClose={onClose} title="About" description="The engine version currently deployed.">
+      {isLoading ? (
+        <SkeletonRows rows={3} className="p-0" />
+      ) : error ? (
+        <p className="text-sm text-destructive">{String(error)}</p>
+      ) : (
+        <KeyValues
+          items={[
+            { label: "Product", value: info?.name ?? "nexus-ai-engine" },
+            { label: "Version", value: info?.version ?? "—", mono: true },
+            ...(info?.env ? [{ label: "Environment", value: info.env }] : []),
+            ...(info?.git_sha && info.git_sha !== "unknown" ? [{ label: "Git", value: info.git_sha, mono: true }] : []),
+          ]}
+        />
+      )}
+    </Modal>
+  );
+}
+
+function Brand({ mini }: { mini?: boolean }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <Logo markOnly={mini} />
+      {!mini && (
+        <span className="rounded border border-border-strong px-1.5 py-px text-[11px] font-medium leading-4 text-muted-foreground">
+          Engine
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -254,32 +136,70 @@ export function Sidebar() {
 
   return (
     <>
-      <div className="hidden md:flex h-full">
-        <SidebarPanel
-          mini={mini}
-          onNavigate={go}
-          onCollapse={() => setMini(true)}
-          onExpand={() => setMini(false)}
-        />
-      </div>
+      {/* Desktop rail */}
+      <aside
+        className={cn(
+          "relative hidden h-full shrink-0 flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-brand-out md:flex",
+          mini ? "w-[var(--sidebar-w-mini)]" : "w-[var(--sidebar-w)]",
+        )}
+      >
+        <div className={cn("flex h-[var(--topbar-h)] shrink-0 items-center", mini ? "justify-center px-2" : "justify-between pl-5 pr-2.5")}>
+          <button type="button" onClick={() => go("/")} aria-label="Nexus AI Engine home" className="rounded-md">
+            <Brand mini={mini} />
+          </button>
+          {!mini && (
+            <button
+              type="button"
+              onClick={() => setMini(true)}
+              aria-label="Collapse sidebar"
+              className="flex h-7 w-7 items-center justify-center rounded-md text-subtle-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Icon name="chevron-left" />
+            </button>
+          )}
+        </div>
+
+        <div className="min-h-0 flex-1 pt-3">
+          <SidebarNav mini={mini} onNavigate={go} />
+        </div>
+
+        {mini && (
+          <button
+            type="button"
+            onClick={() => setMini(false)}
+            aria-label="Expand sidebar"
+            className="absolute -right-3 top-[14px] z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border-strong bg-card text-muted-foreground shadow-xs transition-colors hover:text-foreground"
+          >
+            <Icon name="chevron-right" className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </aside>
+
+      {/* Mobile drawer */}
       {mobileOpen ? (
         <div className="fixed inset-0 z-50 md:hidden">
           <button
             type="button"
-            className="absolute inset-0 bg-black/50"
+            className="absolute inset-0 animate-fade-in bg-black/55 backdrop-blur-[2px]"
             aria-label="Close menu overlay"
             onClick={() => setMobileOpen(false)}
           />
-          <div className="absolute inset-y-0 left-0 shadow-xl">
-            <SidebarPanel
-              mini={false}
-              onNavigate={go}
-              onCollapse={() => setMini(true)}
-              onExpand={() => setMini(false)}
-              onCloseMobile={() => setMobileOpen(false)}
-              showMobileClose
-            />
-          </div>
+          <aside className="absolute inset-y-0 left-0 flex w-[272px] max-w-[86vw] flex-col border-r border-sidebar-border bg-sidebar shadow-lg">
+            <div className="flex h-[var(--topbar-h)] shrink-0 items-center justify-between pl-5 pr-2.5">
+              <Brand />
+              <button
+                type="button"
+                onClick={() => setMobileOpen(false)}
+                aria-label="Close menu"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <Icon name="close" className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 pt-3">
+              <SidebarNav onNavigate={go} />
+            </div>
+          </aside>
         </div>
       ) : null}
     </>

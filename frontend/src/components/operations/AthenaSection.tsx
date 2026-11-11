@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Warehouse } from "lucide-react";
 import {
   Bar,
   CartesianGrid,
   ComposedChart,
-  Legend,
   Line,
   ResponsiveContainer,
   Tooltip,
@@ -13,17 +11,29 @@ import {
   YAxis,
 } from "recharts";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  CHART_MARGIN,
+  ChartLegend,
+  ChartTooltip,
+  axisProps,
+  barProps,
+  cursorBand,
+  cursorLine,
+  gridProps,
+  lineProps,
+  seriesColor,
+} from "@/components/ds/charts";
+import { EmptyState, KeyValues, MetricStrip, Notice, Panel, Segmented, SkeletonRows, StatusPill, type ChipOption } from "@/components/ds/kit";
 import { api } from "@/services/api";
 import type { DataStoreKpi, DataStoreWindow } from "@/types/dataStores";
 
-const KPI_TINT: Record<string, string> = {
-  read_queries: "border-l-sky-500",
-  write_queries: "border-l-amber-400",
-  bytes_scanned: "border-l-violet-500",
-  avg_engine_ms: "border-l-green-500",
-};
+import { ChartBody, ConnectionPill, MetricStripSkeleton, RefreshButton, SectionHeader, stripColumns } from "./parts";
+
+const WINDOWS: ChipOption<DataStoreWindow>[] = [
+  { value: "1h", label: "Last 1h" },
+  { value: "24h", label: "Last 24h" },
+  { value: "7d", label: "Last 7 days" },
+];
 
 function formatBytes(value?: number | null): string {
   if (value == null) return "—";
@@ -69,267 +79,199 @@ export function AthenaSection() {
   const hasTrend = points.some(
     (p) => p.read_queries != null || p.write_queries != null || p.bytes_scanned != null || p.avg_engine_ms != null,
   );
+  const timeOf = (idx: unknown) => points[Number(idx)]?.time ?? "";
+  const kpis = data?.kpis ?? [];
+  const recent = data?.recent_queries || [];
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-lg">
-            <Warehouse className="h-5 w-5" />
-            Athena Database
-          </CardTitle>
-          <CardDescription>
-            Glue catalog and Athena workgroup used for archived job search. Read/write comes from
-            SELECT vs INSERT/CTAS/UNLOAD executions. Page load does not start a new query.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <select
-              className="h-8 rounded-md border bg-background px-2 text-xs"
-              value={window}
-              onChange={(e) => setWindow(e.target.value as DataStoreWindow)}
-              aria-label="Athena window"
-            >
-              <option value="1h">Last 1h</option>
-              <option value="24h">Last 24h</option>
-              <option value="7d">Last 7 days</option>
-            </select>
-            <Button
-              size="sm"
-              onClick={() => qc.invalidateQueries({ queryKey: ["athena-monitoring", window] })}
+    <div className="space-y-6">
+      <SectionHeader
+        title="Athena Database"
+        description="Glue catalog and Athena workgroup used for archived job search. Read/write comes from SELECT vs INSERT/CTAS/UNLOAD executions. Page load does not start a new query."
+        meta={
+          <>
+            <ConnectionPill loading={isLoading} connected={data?.connected} />
+            {data?.ping_ms != null && <span className="num text-sm text-muted-foreground">{data.ping_ms} ms</span>}
+          </>
+        }
+        actions={
+          <>
+            <Segmented options={WINDOWS} value={window} onChange={setWindow} label="Athena window" />
+            <RefreshButton
+              spinning={isFetching}
               disabled={isLoading}
+              onClick={() => qc.invalidateQueries({ queryKey: ["athena-monitoring", window] })}
             >
-              <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />
               Refresh Status
-            </Button>
-            <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                data?.connected ? "bg-emerald-600/20 text-emerald-400" : "bg-red-600/20 text-red-400"
-              }`}
-            >
-              {isLoading ? "checking" : data?.connected ? "connected" : "disconnected"}
-            </span>
-            {data?.ping_ms != null && <span className="text-sm text-muted-foreground">{data.ping_ms} ms</span>}
-            {data?.points_scope === "recent" ? (
-              <span className="text-xs text-muted-foreground">Showing last workgroup executions (none in this window)</span>
-            ) : null}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Region</div>
-              <div className="font-medium">{data?.region || "—"}</div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Glue / Athena</div>
-              <div className="font-medium">
-                {data?.glue_reachable ? "up" : "down"} / {data?.athena_reachable ? "up" : "down"}
-              </div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Database</div>
-              <div className="font-medium">{data?.database || "—"}</div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Workgroup</div>
-              <div className="font-medium">{data?.workgroup || "—"}</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </RefreshButton>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {(isLoading ? Array.from({ length: 4 }).map((_, i) => ({ id: String(i) }) as DataStoreKpi) : data?.kpis ?? []).map(
-          (kpi) => (
-            <Card key={kpi.id} className={`border-l-4 ${KPI_TINT[kpi.id] ?? "border-l-primary"}`}>
-              <CardContent className="p-4">
-                {isLoading ? (
-                  <div className="h-12 animate-pulse rounded bg-muted" />
-                ) : (
-                  <>
-                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{kpi.label}</div>
-                    <div className="mt-1 text-2xl font-bold">{formatKpi(kpi)}</div>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          ),
-        )}
+      {data?.points_scope === "recent" ? (
+        <Notice tone="neutral">Showing last workgroup executions (none in this window)</Notice>
+      ) : null}
+
+      {isLoading ? (
+        <MetricStripSkeleton count={4} />
+      ) : kpis.length > 0 ? (
+        <MetricStrip
+          columns={stripColumns(kpis.length)}
+          items={kpis.map((kpi) => ({ label: kpi.label, value: formatKpi(kpi) }))}
+        />
+      ) : null}
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Panel title="Read / write query trend">
+          <ChartBody loading={isLoading} empty={!hasTrend && "No Athena query executions to chart yet."}>
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={points} margin={CHART_MARGIN}>
+                <CartesianGrid {...gridProps} />
+                <XAxis
+                  dataKey="idx"
+                  type="number"
+                  domain={["dataMin", "dataMax"]}
+                  tickFormatter={timeOf}
+                  {...axisProps}
+                  interval="preserveStartEnd"
+                  minTickGap={28}
+                />
+                <YAxis yAxisId="count" allowDecimals={false} {...axisProps} width={36} />
+                <YAxis yAxisId="bytes" orientation="right" {...axisProps} width={64} tickFormatter={(v) => formatBytes(v)} />
+                <Tooltip
+                  cursor={cursorBand}
+                  content={
+                    <ChartTooltip
+                      labelFormatter={timeOf}
+                      valueFormatter={(value, name) =>
+                        name === "Data scanned" ? formatBytes(value as number) : value != null ? Number(value) : "—"
+                      }
+                    />
+                  }
+                />
+                <Bar yAxisId="count" dataKey="read_queries" name="Read queries" fill={seriesColor(0)} {...barProps} maxBarSize={14} />
+                <Bar yAxisId="count" dataKey="write_queries" name="Write queries" fill={seriesColor(1)} {...barProps} maxBarSize={14} />
+                <Line yAxisId="bytes" dataKey="bytes_scanned" name="Data scanned" stroke={seriesColor(2)} {...lineProps} connectNulls />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <ChartLegend
+              className="mt-3"
+              items={[
+                { label: "Read", color: seriesColor(0) },
+                { label: "Write", color: seriesColor(1) },
+                { label: "Scanned (right axis)", color: seriesColor(2) },
+              ]}
+            />
+          </ChartBody>
+        </Panel>
+
+        <Panel title="Engine time">
+          <ChartBody loading={isLoading} empty={!hasTrend && "No engine-time samples yet."}>
+            <ResponsiveContainer width="100%" height={240}>
+              <ComposedChart data={points} margin={CHART_MARGIN}>
+                <CartesianGrid {...gridProps} />
+                <XAxis
+                  dataKey="idx"
+                  type="number"
+                  domain={["dataMin", "dataMax"]}
+                  tickFormatter={timeOf}
+                  {...axisProps}
+                  interval="preserveStartEnd"
+                  minTickGap={28}
+                />
+                <YAxis {...axisProps} width={56} tickFormatter={(v) => `${v} ms`} />
+                <Tooltip
+                  cursor={cursorLine}
+                  content={
+                    <ChartTooltip
+                      labelFormatter={timeOf}
+                      valueFormatter={(value) => (value != null ? `${Number(value).toFixed(0)} ms` : "—")}
+                    />
+                  }
+                />
+                <Line dataKey="avg_engine_ms" name="Avg engine" stroke={seriesColor(0)} {...lineProps} connectNulls />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <ChartLegend className="mt-3" items={[{ label: "Avg engine", color: seriesColor(0) }]} />
+          </ChartBody>
+        </Panel>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Read / write query trend</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">Loading…</div>
-          ) : !hasTrend ? (
-            <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">
-              No Athena query executions to chart yet.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={points}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis
-                  dataKey="idx"
-                  type="number"
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(idx) => points[Number(idx)]?.time ?? ""}
-                  tick={{ fontSize: 10 }}
-                  interval="preserveStartEnd"
-                  minTickGap={28}
-                />
-                <YAxis yAxisId="count" allowDecimals={false} tick={{ fontSize: 10 }} width={36} />
-                <YAxis yAxisId="bytes" orientation="right" tick={{ fontSize: 10 }} width={56} tickFormatter={(v) => formatBytes(v)} />
-                <Tooltip
-                  content={({ payload }) => {
-                    if (!payload?.length) return null;
-                    const time = (payload[0].payload as { time?: string })?.time;
-                    return (
-                      <div className="bg-background border rounded p-2 text-xs shadow space-y-1">
-                        <div className="font-medium">{time}</div>
-                        {payload.map((item) => (
-                          <div key={String(item.dataKey)} style={{ color: String(item.color) }}>
-                            {item.name}:{" "}
-                            {item.dataKey === "bytes_scanned"
-                              ? formatBytes(item.value as number)
-                              : item.value != null
-                                ? Number(item.value)
-                                : "—"}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar yAxisId="count" dataKey="read_queries" name="Read queries" fill="#38bdf880" maxBarSize={14} />
-                <Bar yAxisId="count" dataKey="write_queries" name="Write queries" fill="#eab30880" maxBarSize={14} />
-                <Line
-                  yAxisId="bytes"
-                  type="monotone"
-                  dataKey="bytes_scanned"
-                  name="Data scanned"
-                  stroke="#8b5cf6"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Engine time</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading || !hasTrend ? (
-            <div className="h-[240px] flex items-center justify-center text-sm text-muted-foreground">
-              {isLoading ? "Loading…" : "No engine-time samples yet."}
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={240}>
-              <ComposedChart data={points}>
-                <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                <XAxis
-                  dataKey="idx"
-                  type="number"
-                  domain={["dataMin", "dataMax"]}
-                  tickFormatter={(idx) => points[Number(idx)]?.time ?? ""}
-                  tick={{ fontSize: 10 }}
-                  interval="preserveStartEnd"
-                  minTickGap={28}
-                />
-                <YAxis tick={{ fontSize: 10 }} width={44} tickFormatter={(v) => `${v} ms`} />
-                <Tooltip
-                  content={({ payload }) => {
-                    if (!payload?.length) return null;
-                    const time = (payload[0].payload as { time?: string })?.time;
-                    return (
-                      <div className="bg-background border rounded p-2 text-xs shadow space-y-1">
-                        <div className="font-medium">{time}</div>
-                        {payload.map((item) => (
-                          <div key={String(item.dataKey)} style={{ color: String(item.color) }}>
-                            {item.name}: {item.value != null ? `${Number(item.value).toFixed(0)} ms` : "—"}
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="avg_engine_ms" name="Avg engine" stroke="#22c55e" strokeWidth={2} dot={false} connectNulls />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Archived jobs table</CardTitle>
-          <CardDescription>
-            Glue table {table?.name || "archived_jobs"} used when Dynamo job history is archived.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Exists</div>
-              <div className="font-medium">{table?.exists ? "yes" : "no"}</div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Partitions</div>
-              <div className="font-medium">
-                {table?.partition_count ?? "—"}
-                {table?.partitions_truncated ? "+" : ""}
-              </div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Record count</div>
-              <div className="font-medium">{table?.record_count ?? "—"}</div>
-            </div>
-            <div className="border rounded-lg p-3">
-              <div className="text-muted-foreground">Archive bucket</div>
-              <div className="font-medium break-all">{data?.archive_bucket || "—"}</div>
-            </div>
-          </div>
-          {table?.location ? (
-            <div className="text-xs font-mono break-all text-muted-foreground">{table.location}</div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent Athena queries</CardTitle>
-          <CardDescription>Last executions in this workgroup. Page load does not start a new query.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {(data?.recent_queries || []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">{isLoading ? "Loading…" : "No recent query executions."}</p>
-          ) : (
-            <div className="text-sm border rounded-lg divide-y">
-              {(data?.recent_queries || []).map((q) => (
-                <div key={q.id} className="flex justify-between gap-3 px-3 py-2">
-                  <span className="font-mono break-all">{q.id}</span>
-                  <span className="text-muted-foreground shrink-0">
-                    {q.kind || "—"}
-                    {q.state ? ` · ${q.state}` : ""}
-                    {q.engine_ms != null ? ` · ${q.engine_ms} ms` : ""}
-                    {q.bytes_scanned_human ? ` · ${q.bytes_scanned_human}` : ""}
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Panel title="Connection">
+          <KeyValues
+            items={[
+              { label: "Region", value: data?.region || "—" },
+              {
+                label: "Glue / Athena",
+                value: (
+                  <span className="inline-flex items-center gap-2">
+                    <StatusPill status={data?.glue_reachable ? "up" : "down"} />
+                    <span className="text-subtle-foreground">/</span>
+                    <StatusPill status={data?.athena_reachable ? "up" : "down"} />
                   </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ),
+              },
+              { label: "Database", value: data?.database || "—" },
+              { label: "Workgroup", value: data?.workgroup || "—" },
+            ]}
+          />
+        </Panel>
+
+        <Panel
+          title="Archived jobs table"
+          footer={<>Glue table {table?.name || "archived_jobs"} used when Dynamo job history is archived.</>}
+        >
+          <KeyValues
+            items={[
+              { label: "Exists", value: table?.exists ? "yes" : "no" },
+              { label: "Partitions", value: `${table?.partition_count ?? "—"}${table?.partitions_truncated ? "+" : ""}` },
+              { label: "Record count", value: table?.record_count ?? "—" },
+              { label: "Archive bucket", value: data?.archive_bucket || "—" },
+            ]}
+          />
+          {table?.location ? (
+            <div className="mt-3 break-all font-mono text-xs text-muted-foreground">{table.location}</div>
+          ) : null}
+        </Panel>
+      </div>
+
+      <Panel
+        title="Recent Athena queries"
+        flush
+        footer="Last executions in this workgroup. Page load does not start a new query."
+      >
+        {isLoading ? (
+          <SkeletonRows rows={3} />
+        ) : recent.length === 0 ? (
+          <EmptyState bare icon="database" title="No recent query executions." />
+        ) : (
+          <div className="scroll-thin overflow-x-auto">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Query</th>
+                  <th>Kind</th>
+                  <th>State</th>
+                  <th className="r">Engine time</th>
+                  <th className="r">Scanned</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recent.map((q) => (
+                  <tr key={q.id}>
+                    <td className="break-all font-mono text-xs text-foreground">{q.id}</td>
+                    <td className="text-muted-foreground">{q.kind || "—"}</td>
+                    <td>{q.state ? <StatusPill status={q.state} /> : "—"}</td>
+                    <td className="r num whitespace-nowrap">{q.engine_ms != null ? `${q.engine_ms} ms` : "—"}</td>
+                    <td className="r num whitespace-nowrap">{q.bytes_scanned_human || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

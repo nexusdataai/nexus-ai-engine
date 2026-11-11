@@ -1,23 +1,11 @@
 import { useState } from "react";
-import { Eye, Loader2 } from "lucide-react";
 
+import { Icon } from "@/components/ds/Icon";
+import { DetailSheet, EmptyState, Field, Panel, SkeletonRows, StatusPill } from "@/components/ds/kit";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import { api } from "@/services/api";
 import type { ArchivedJobRow } from "@/types/api";
-
-function statusColor(status?: string | null): string {
-  switch (status) {
-    case "in_progress":
-      return "bg-blue-100 text-blue-700";
-    case "completed":
-      return "bg-green-100 text-green-800";
-    case "failed":
-      return "bg-red-100 text-red-800";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 export function ArchivedJobsSearch() {
   const [query, setQuery] = useState("");
@@ -57,156 +45,123 @@ export function ArchivedJobsSearch() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Archived Jobs</CardTitle>
-        <CardDescription>Search historical jobs archived from DynamoDB to Glue/Athena</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="space-y-1 text-xs text-muted-foreground">
-            Job # or ID
-            <input
-              className="block h-9 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
-              placeholder="e.g. 5006"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          </label>
-          <label className="space-y-1 text-xs text-muted-foreground">
-            From
-            <input
-              type="date"
-              className="block h-9 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
-          </label>
-          <label className="space-y-1 text-xs text-muted-foreground">
-            To
-            <input
-              type="date"
-              className="block h-9 w-40 rounded-md border bg-background px-2 text-sm text-foreground"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
-          </label>
-          <Button size="sm" className="h-9" onClick={() => void handleSearch()} disabled={searching}>
-            {searching ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
-            Search
-          </Button>
-        </div>
+    <Panel
+      title="Archived Jobs"
+      description="Search historical jobs archived from DynamoDB to Glue/Athena"
+      flush
+    >
+      <form
+        className="flex flex-wrap items-end gap-3 border-b border-border p-4 sm:px-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleSearch();
+        }}
+      >
+        <Field label="Job # or ID" htmlFor="arch-q" className="w-full sm:w-48">
+          <input id="arch-q" className="field" placeholder="e.g. 5006" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </Field>
+        <Field label="From" htmlFor="arch-from" className="w-[calc(50%-6px)] sm:w-44">
+          <input id="arch-from" type="date" className="field" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        </Field>
+        <Field label="To" htmlFor="arch-to" className="w-[calc(50%-6px)] sm:w-44">
+          <input id="arch-to" type="date" className="field" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        </Field>
+        <Button type="submit" disabled={searching}>
+          <Icon name={searching ? "spinner" : "search"} className={searching ? "animate-spin" : undefined} />
+          Search
+        </Button>
+      </form>
 
-        {searched ? (
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-3 py-2 text-left font-medium">Job</th>
-                  <th className="px-3 py-2 text-left font-medium">Stage</th>
-                  <th className="px-3 py-2 text-left font-medium">Status</th>
-                  <th className="px-3 py-2 text-left font-medium">Start Time</th>
-                  <th className="px-3 py-2 text-left font-medium">Duration</th>
-                  <th className="px-3 py-2 text-left font-medium">Triggered By</th>
-                  <th className="px-3 py-2 text-left font-medium">Logs</th>
+      {!searched ? (
+        <EmptyState bare icon="folder" title="Search the archive" description="Enter a job number or pick a date range, then search. Results come from the long-term archive, so a search can take a few seconds." />
+      ) : searching ? (
+        <SkeletonRows rows={4} />
+      ) : results.length === 0 ? (
+        <EmptyState bare icon="search" title="No archived jobs found" description="Try a wider date range or a different job number." />
+      ) : (
+        <div className="scroll-thin overflow-x-auto">
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Job</th>
+                <th>Stage</th>
+                <th>Status</th>
+                <th>Start Time</th>
+                <th className="r">Duration</th>
+                <th>Triggered By</th>
+                <th className="r">Logs</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((job) => (
+                <tr key={job.job_id} className="cursor-pointer" onClick={() => void handleViewLogs(job)}>
+                  <td className="font-mono text-xs text-foreground">#{job.execution_number ?? job.job_id}</td>
+                  <td>{job.stage_name || job.stage_id || "—"}</td>
+                  <td>{job.status ? <StatusPill status={job.status} /> : "—"}</td>
+                  <td className="whitespace-nowrap text-muted-foreground">
+                    {job.start_time ? new Date(job.start_time).toLocaleString() : "-"}
+                  </td>
+                  <td className="r num">{job.duration ? `${Math.round(Number(job.duration))}s` : "-"}</td>
+                  <td className="text-muted-foreground">{job.triggered_by || "-"}</td>
+                  <td className="r">
+                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                      <Icon name="eye" className="h-3.5 w-3.5" /> View
+                    </span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {results.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">
-                      {searching ? "Searching…" : "No archived jobs found"}
-                    </td>
-                  </tr>
-                ) : (
-                  results.map((job) => (
-                    <tr key={job.job_id} className="cursor-pointer border-t hover:bg-muted/30" onClick={() => void handleViewLogs(job)}>
-                      <td className="px-3 py-2 font-mono text-xs">#{job.execution_number ?? job.job_id}</td>
-                      <td className="px-3 py-2">{job.stage_name || job.stage_id || "—"}</td>
-                      <td className="px-3 py-2">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${statusColor(job.status)}`}>
-                          {job.status || "—"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">
-                        {job.start_time ? new Date(job.start_time).toLocaleString() : "-"}
-                      </td>
-                      <td className="px-3 py-2 text-xs">
-                        {job.duration ? `${Math.round(Number(job.duration))}s` : "-"}
-                      </td>
-                      <td className="px-3 py-2 text-xs">{job.triggered_by || "-"}</td>
-                      <td className="px-3 py-2">
-                        <Eye className="h-4 w-4 text-muted-foreground" />
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        ) : null}
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-        {selectedJob ? (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedJob(null)}>
-            <div className="max-h-[80vh] w-full max-w-4xl overflow-hidden rounded-lg bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between border-b px-6 py-4">
-                <div>
-                  <h3 className="text-lg font-semibold">Job #{selectedJob.execution_number} — Step Logs</h3>
-                  <p className="text-sm text-muted-foreground">
-                    {selectedJob.job_id} • {selectedJob.status}
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedJob(null)}>
-                  ✕
-                </Button>
-              </div>
-              <div className="max-h-[calc(80vh-80px)] overflow-y-auto p-6">
-                {loadingLogs ? (
-                  <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                    Loading logs from S3…
-                  </div>
-                ) : Object.keys(stepLogs).length === 0 ? (
-                  <p className="py-12 text-center text-muted-foreground">No step logs found for this job</p>
-                ) : (
-                  <div className="space-y-4">
-                    {Object.entries(stepLogs).map(([stepName, logs]) => {
-                      const entries = Array.isArray(logs) ? logs : [];
-                      return (
-                        <div key={stepName} className="rounded-lg border">
-                          <div className="flex items-center border-b bg-muted/50 px-4 py-2 text-sm font-medium">
-                            {stepName.replace(/_/g, " ")}
-                            <span className="ml-auto text-xs text-muted-foreground">{entries.length} entries</span>
-                          </div>
-                          <div className="max-h-48 overflow-y-auto bg-[#0d1117] p-3 font-mono text-xs text-green-400">
-                            {entries.map((entry: { timestamp?: string; level?: string; message?: string }, idx: number) => (
-                              <div key={idx} className="py-0.5">
-                                <span className="text-gray-500">{entry.timestamp?.substring(11, 19) || ""}</span>{" "}
-                                <span
-                                  className={
-                                    entry.level === "ERROR"
-                                      ? "text-red-400"
-                                      : entry.level === "WARNING"
-                                        ? "text-yellow-400"
-                                        : "text-green-400"
-                                  }
-                                >
-                                  {entry.level}
-                                </span>{" "}
-                                {entry.message}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+      <DetailSheet
+        open={Boolean(selectedJob)}
+        onClose={() => setSelectedJob(null)}
+        wide
+        title={selectedJob ? `Job #${selectedJob.execution_number} — Step Logs` : ""}
+        description={selectedJob?.job_id}
+        meta={selectedJob?.status ? <StatusPill status={selectedJob.status} variant="soft" /> : undefined}
+      >
+        {loadingLogs ? (
+          <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+            <Icon name="spinner" className="animate-spin" />
+            Loading logs from S3…
           </div>
-        ) : null}
-      </CardContent>
-    </Card>
+        ) : Object.keys(stepLogs).length === 0 ? (
+          <EmptyState bare icon="terminal" title="No step logs found for this job" />
+        ) : (
+          <div className="space-y-4">
+            {Object.entries(stepLogs).map(([stepName, logs]) => {
+              const entries = Array.isArray(logs) ? logs : [];
+              return (
+                <section key={stepName} className="overflow-hidden rounded-lg border border-border">
+                  <div className="flex items-center border-b border-border bg-surface-2/60 px-4 py-2 text-sm font-medium first-letter:uppercase">
+                    {stepName.replace(/_/g, " ")}
+                    <span className="num ml-auto text-xs font-normal text-muted-foreground">{entries.length} entries</span>
+                  </div>
+                  <div className="scroll-thin max-h-56 overflow-y-auto bg-background p-3 font-mono text-xs leading-5">
+                    {entries.map((entry: { timestamp?: string; level?: string; message?: string }, idx: number) => (
+                      <div key={idx} className="flex gap-3 whitespace-pre-wrap break-all">
+                        <span className="num shrink-0 text-subtle-foreground">{entry.timestamp?.substring(11, 19) || ""}</span>
+                        <span
+                          className={cn(
+                            "w-[58px] shrink-0",
+                            entry.level === "ERROR" ? "text-destructive" : entry.level === "WARNING" ? "text-warning" : "text-primary dark:text-brand-hi",
+                          )}
+                        >
+                          {entry.level}
+                        </span>
+                        <span className="min-w-0 text-foreground">{entry.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </DetailSheet>
+    </Panel>
   );
 }

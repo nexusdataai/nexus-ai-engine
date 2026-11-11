@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { Icon } from "@/components/ds/Icon";
+import { PageHeader } from "@/components/ds/kit";
 import { AppDiagnosticsSection } from "@/components/operations/AppDiagnosticsSection";
 import { AppTrendsSection } from "@/components/operations/AppTrendsSection";
 import { ComingSoonPanel } from "@/components/operations/ComingSoonPanel";
@@ -131,103 +133,112 @@ export function OperationsPage() {
     return <ComingSoonPanel title={getTabLabel(activeTab) || "This area"} />;
   };
 
+  const showSections = activeView === "monitoring" && !!activeSection;
+  const hasRail = showSections || sectionTabs.length > 0;
+  const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
   return (
-    <div className="w-full max-w-7xl mx-auto space-y-5">
-      <div>
-        <h2 className="text-xl font-semibold">Operations</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Monitor infrastructure health and system SLAs for this ai-engine.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Operations"
+        description="Monitor infrastructure health and system SLAs for this ai-engine."
+      />
 
-      <div className="space-y-4">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
-            Operation Views
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {OPERATIONS_VIEWS.map((view) => {
-              const Icon = view.icon;
-              const active = activeView === view.id;
-              return (
-                <button
-                  key={view.id}
-                  type="button"
-                  onClick={() => handleViewChange(view.id)}
-                  className={cn(
-                    "inline-flex h-11 items-center gap-2 rounded-lg px-4 text-sm font-semibold transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground shadow-sm"
-                      : "bg-muted text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-5 w-5 shrink-0" />
-                  {view.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+      {/* Level 1: operation views (underline row). */}
+      <nav aria-label="Operation Views" className="scrollbar-hide flex gap-6 overflow-x-auto border-b border-border">
+        {OPERATIONS_VIEWS.map((view) => {
+          const active = activeView === view.id;
+          return (
+            <button
+              key={view.id}
+              type="button"
+              aria-current={active ? "page" : undefined}
+              onClick={() => handleViewChange(view.id)}
+              className={cn(
+                "relative flex h-10 shrink-0 items-center gap-2 whitespace-nowrap text-sm font-medium transition-colors duration-200",
+                focusRing,
+                active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Icon name={view.icon} className={active ? "text-primary dark:text-brand-hi" : "text-subtle-foreground"} />
+              {view.label}
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "absolute inset-x-0 bottom-0 h-0.5 origin-center rounded-full bg-primary transition-transform duration-300 ease-brand-out",
+                  active ? "scale-x-100" : "scale-x-0",
+                )}
+              />
+            </button>
+          );
+        })}
+      </nav>
 
-        {activeView === "monitoring" && activeSection ? (
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground mb-2">
-              Section
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {MONITORING_SECTIONS.map((section) => {
-                const Icon = section.icon;
-                const active = activeSection === section.id;
-                return (
-                  <button
-                    key={section.id}
-                    type="button"
-                    onClick={() => handleSectionChange(section.id)}
-                    className={cn(
-                      "inline-flex h-12 min-w-[8rem] items-center gap-2 rounded-xl px-5 text-base font-semibold transition-colors",
-                      active
-                        ? "bg-primary text-primary-foreground shadow-sm"
-                        : "bg-muted text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <Icon className="h-5 w-5 shrink-0" />
-                    {section.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+      <div className={cn("grid gap-6", hasRail && "lg:grid-cols-[13rem_minmax(0,1fr)]")}>
+        {/* Levels 2 and 3: a rail on desktop, a scrolling row on phones. */}
+        {hasRail ? (
+          <aside className="min-w-0 space-y-3 lg:sticky lg:top-[calc(var(--topbar-h,4rem)+1.5rem)] lg:self-start">
+            {showSections ? (
+              <div
+                role="group"
+                aria-label="Section"
+                className="inline-flex w-full items-center gap-0.5 rounded-lg border border-border bg-surface-2/60 p-0.5 sm:w-64 lg:w-full"
+              >
+                {MONITORING_SECTIONS.map((section) => {
+                  const active = activeSection === section.id;
+                  return (
+                    <button
+                      key={section.id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => handleSectionChange(section.id)}
+                      className={cn(
+                        "flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors duration-150",
+                        focusRing,
+                        active ? "bg-card text-foreground shadow-xs ring-1 ring-border" : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <Icon name={section.icon} className="h-3.5 w-3.5" />
+                      {section.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {sectionTabs.length > 0 ? (
+              <nav
+                aria-label={`${OPERATIONS_VIEWS.find((v) => v.id === activeView)?.label ?? "Operations"} pages`}
+                className="scrollbar-hide flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible"
+              >
+                {sectionTabs.map((tab) => {
+                  const active = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => handleTabChange(tab.id)}
+                      className={cn(
+                        "flex h-9 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md px-2.5 text-left text-sm transition-colors duration-150",
+                        focusRing,
+                        active
+                          ? "bg-accent font-medium text-foreground"
+                          : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                      )}
+                    >
+                      <Icon name={tab.icon} className={active ? "text-primary dark:text-brand-hi" : "text-subtle-foreground"} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </nav>
+            ) : null}
+          </aside>
         ) : null}
 
-        {sectionTabs.length > 0 ? (
-          <div className="border-b">
-            <div className="flex gap-1 -mb-px overflow-x-auto">
-              {sectionTabs.map((tab) => {
-                const Icon = tab.icon;
-                const active = activeTab === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => handleTabChange(tab.id)}
-                    className={cn(
-                      "flex items-center gap-2 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition-colors",
-                      active
-                        ? "border-primary text-primary"
-                        : "border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground/30",
-                    )}
-                  >
-                    <Icon className="h-5 w-5 shrink-0" />
-                    {tab.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ) : null}
+        <div className="min-h-[400px] min-w-0">{renderContent()}</div>
       </div>
-
-      <div className="min-h-[400px]">{renderContent()}</div>
     </div>
   );
 }

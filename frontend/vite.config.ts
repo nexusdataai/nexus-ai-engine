@@ -1,8 +1,12 @@
 import path from "node:path";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 
-export default defineConfig({
+// Local dev: set VITE_PROXY_TARGET in .env.local to proxy the API to another
+// engine (for example a shared test server). Defaults to a backend on :8000.
+export default defineConfig(({ mode }) => {
+  const target = loadEnv(mode, __dirname, "").VITE_PROXY_TARGET || "http://127.0.0.1:8000";
+  return {
   plugins: [react()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "src") },
@@ -11,19 +15,19 @@ export default defineConfig({
     port: 8080,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        target,
         changeOrigin: true,
       },
       "/version": {
-        target: "http://127.0.0.1:8000",
+        target,
         changeOrigin: true,
       },
       "/health": {
-        target: "http://127.0.0.1:8000",
+        target,
         changeOrigin: true,
       },
       "/readiness": {
-        target: "http://127.0.0.1:8000",
+        target,
         changeOrigin: true,
       },
     },
@@ -33,4 +37,5 @@ export default defineConfig({
     sourcemap: true,
     target: "es2022",
   },
+};
 });

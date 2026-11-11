@@ -25,20 +25,25 @@ function JobChip({ job, className }: { job: AnimatedJob; className?: string }) {
     <Link
       to={jobHref(job)}
       className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-mono transition-all duration-500",
-        job.leaving && "opacity-0 scale-75 max-w-0 px-0 border-transparent overflow-hidden",
-        job.state === "waiting" && "border-amber-500/40 bg-amber-500/10 text-amber-200",
-        job.state === "claimed" && "border-slate-500/40 bg-slate-500/10 text-slate-200",
-        job.state === "running" && "border-blue-500/40 bg-blue-500/10 text-blue-200",
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 font-mono text-xs transition-all duration-500",
+        job.leaving && "max-w-0 scale-75 overflow-hidden border-transparent px-0 opacity-0",
+        job.state === "waiting" && "border-warning/30 bg-warning/10 text-warning",
+        job.state === "claimed" && "border-border-strong bg-surface-2 text-muted-foreground",
+        job.state === "running" && "border-brand/40 bg-brand/10 text-primary dark:text-brand-hi",
         className,
       )}
       title={job.job_id}
     >
-      <span>{truncateId(job.job_id, 10)}</span>
+      <span className="truncate">{truncateId(job.job_id, 10)}</span>
     </Link>
   );
 }
 
+/**
+ * The queue as it is right now: jobs wait on the left and move into one of
+ * the engine's running slots on the right. One slot per unit of the global
+ * job limit.
+ */
 export function QueueVisualization({ jobs, maxGlobal, activeFromSummary }: Props) {
   const [displayJobs, setDisplayJobs] = useState<AnimatedJob[]>(jobs);
   const prevIds = useRef<Set<string>>(new Set());
@@ -63,6 +68,7 @@ export function QueueVisualization({ jobs, maxGlobal, activeFromSummary }: Props
 
     setDisplayJobs(jobs);
     prevIds.current = nextIds;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs]);
 
   const { waiting, running } = useMemo(() => {
@@ -91,52 +97,65 @@ export function QueueVisualization({ jobs, maxGlobal, activeFromSummary }: Props
     }
     return null;
   });
+  const moving = waiting.length > 0 || activeSlots > 0;
 
   return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-border bg-muted/20 p-4">
-        <p className="text-xs font-medium text-muted-foreground mb-2">Waiting lane</p>
+    <div className="grid gap-4 lg:grid-cols-[minmax(220px,0.9fr)_56px_minmax(0,2.4fr)] lg:gap-0">
+      <div>
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <p className="text-sm font-medium text-foreground">Waiting</p>
+          <span className="num text-xs text-muted-foreground">{waiting.length} in line</span>
+        </div>
         <div
-          className="flex min-h-10 flex-wrap items-center gap-2 transition-all duration-500"
+          className="flex min-h-[120px] flex-wrap content-start items-start gap-1.5 rounded-lg border border-border bg-surface-2/50 p-3 transition-all duration-500"
           data-testid="queue-waiting-lane"
         >
           {waiting.length === 0 ? (
-            <span className="text-xs text-muted-foreground italic">No jobs waiting</span>
+            <span className="m-auto text-sm text-subtle-foreground">No jobs waiting</span>
           ) : (
             waiting.map((job) => <JobChip key={job.stream_id} job={job} />)
           )}
         </div>
       </div>
 
-      <div className="flex items-center justify-center text-muted-foreground">
-        <span className="text-lg">→</span>
+      <div className="hidden items-center justify-center lg:flex" aria-hidden="true">
+        <svg viewBox="0 0 56 12" className="mt-7 h-3 w-full">
+          <line x1="6" y1="6" x2="46" y2="6" strokeWidth="1.5" strokeLinecap="round" className={cn(moving ? "flow-line stroke-brand" : "stroke-border-strong")} strokeDasharray={moving ? undefined : "2 6"} />
+          <path d="M44 2 l4 4 l-4 4" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={moving ? "stroke-brand" : "stroke-border-strong"} />
+        </svg>
       </div>
 
-      <div className="rounded-lg border border-border bg-muted/20 p-4">
-        <p className="text-xs font-medium text-muted-foreground mb-2">
-          Active slots ({activeSlots} running / {maxGlobal} max)
-        </p>
+      <div className="min-w-0">
+        <div className="mb-2 flex items-baseline justify-between gap-2">
+          <p className="text-sm font-medium text-foreground">
+            Active slots <span className="font-normal text-muted-foreground">({activeSlots} running / {maxGlobal} max)</span>
+          </p>
+          <span className="num text-xs text-muted-foreground">{Math.max(maxGlobal - activeSlots, 0)} free</span>
+        </div>
         <div
           className={cn(
-            "grid gap-2",
-            maxGlobal > 10 ? "sm:grid-cols-5 lg:grid-cols-10" : "sm:grid-cols-2 lg:grid-cols-5",
+            "grid gap-1.5 rounded-lg border border-border bg-surface-2/50 p-3",
+            maxGlobal > 10 ? "grid-cols-5 lg:grid-cols-10" : "grid-cols-2 sm:grid-cols-5",
           )}
           data-testid="queue-active-slots"
         >
           {slots.map((job, idx) => (
             <div
               key={job?.stream_id ?? `empty-${idx}`}
+              title={job ? undefined : "empty"}
               className={cn(
-                "flex min-h-12 items-center justify-center rounded-md border border-dashed px-2 transition-all duration-500",
-                job ? "border-solid" : "border-border/60 bg-background/40",
+                "flex h-9 min-w-0 items-center justify-center rounded-md border transition-all duration-500",
+                job ? "border-transparent" : "border-dashed border-border-strong/70",
               )}
             >
               {job && !job.stream_id.startsWith("active-placeholder-") ? (
-                <JobChip job={job} className="w-full justify-center" />
+                <JobChip job={job} className="h-full w-full justify-center" />
               ) : job ? (
-                <span className="text-xs text-blue-300/80 font-mono">running</span>
+                <span className="flex h-full w-full items-center justify-center rounded-md border border-brand/40 bg-brand/10 font-mono text-xs text-primary dark:text-brand-hi">
+                  running
+                </span>
               ) : (
-                <span className="text-xs text-muted-foreground">empty</span>
+                <span className="sr-only">empty</span>
               )}
             </div>
           ))}

@@ -29,6 +29,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 KIT_VERSION = "1.0.0"
+#: Failure cards shown in full before the report points to the table instead.
+MAX_FAILURE_CARDS = 20
 
 # ---------------------------------------------------------------- catalogue
 
@@ -166,6 +168,15 @@ def load_pytest(path: str, kind: str, title: str) -> Dict[str, Any]:
             message = str(lr)[:300]
         run["tests"].append({"id": nodeid, "module": module, "group": group, "name": name, "outcome": outcome,
                              "duration": dur, "message": str(message or ""), "detail": str(detail or ""), "steps": []})
+    # Files pytest could not even load count as errors, so they are not silently missing.
+    for c in data.get("collectors") or []:
+        if c.get("outcome") == "failed" and str(c.get("nodeid", "")).endswith(".py"):
+            nodeid = c["nodeid"]
+            detail = str(c.get("longrepr") or "")
+            last = [ln for ln in detail.strip().splitlines() if ln.strip()]
+            run["tests"].append({"id": nodeid, "module": os.path.basename(nodeid)[:-3], "group": "could not be loaded", "name": os.path.basename(nodeid),
+                                 "outcome": "error", "duration": 0.0, "message": (last[-1].lstrip("E ").strip() if last else "The test file could not be loaded."),
+                                 "detail": detail, "steps": []})
     _count(run)
     declared = data.get("summary") or {}
     if not run["tests"] and declared:
@@ -676,7 +687,10 @@ def render_report(run: Dict[str, Any], component: str = "", home: Optional[str] 
         fail_html = "".join(
             f'<div class="card pad fail-card"><h3>{esc(t["id"])}</h3>'
             f'<p class="why">{esc(t["message"] or "No message was recorded.")}</p>'
-            + (f'<pre>{esc(t["detail"])}</pre>' if t["detail"] else "") + "</div>" for t in failed)
+            + (f'<pre>{esc(t["detail"])}</pre>' if t["detail"] else "") + "</div>" for t in failed[:MAX_FAILURE_CARDS])
+        if len(failed) > MAX_FAILURE_CARDS:
+            fail_html += (f'<div class="card pad" style="margin-top:12px;color:var(--muted-fg)">Showing the first {MAX_FAILURE_CARDS} of {len(failed)}. '
+                          f'Every failure is in the table below: choose <b style="color:var(--fg)">Failed</b> or <b style="color:var(--fg)">Errors</b> and select a row to see its details.</div>')
     else:
         fail_html = f'<div class="card pad"><div class="allgood">{icon("check-circle")}<div><b>No failures</b><br><span>Nothing in this run needs attention.</span></div></div></div>'
 

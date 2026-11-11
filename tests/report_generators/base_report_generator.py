@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Any, Optional
+import os
 import json
 
 
@@ -69,6 +70,28 @@ class BaseReportGenerator(ABC):
     def generate_report(self) -> bool:
         """Main method to generate the complete report"""
         print(f"🔄 Generating {self.title}...")
+
+        # Branded report in the Nexus AI product theme (nexus_report_kit.py).
+        # Set NEXUS_CLASSIC_REPORTS=1 to get the previous page; any problem
+        # with the new one also falls back to it, so a report is always written.
+        if os.environ.get("NEXUS_CLASSIC_REPORTS") != "1":
+            try:
+                try:
+                    from . import nexus_report_kit as _kit
+                except ImportError:
+                    import nexus_report_kit as _kit
+                _kit.render_file(
+                    _kit.kind_for(type(self).__name__, str(self.input_path), self.title),
+                    str(self.input_path), str(self.output_path),
+                    component=os.environ.get("NEXUS_REPORT_COMPONENT", "AI Engine"),
+                    home=os.environ.get("NEXUS_REPORT_HOME") or None,
+                    portal=os.environ.get("NEXUS_REPORT_PORTAL") or None,
+                )
+                print(f"✅ Generated HTML report: {self.output_path}")
+                return True
+            except Exception as e:  # noqa: BLE001 - never lose a report over styling
+                print(f"⚠️  New report layout unavailable ({e}); writing the classic report.")
+
         
         if not self.load_data():
             return False

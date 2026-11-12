@@ -117,6 +117,7 @@ describe("SSE hooks", () => {
       {
         id: "stg1",
         name: "S",
+        status: "pending",
         order: 1,
         steps: [
           { id: "step1", name: "A", order: 1 },
@@ -145,6 +146,7 @@ describe("SSE hooks", () => {
       {
         id: "stg1",
         name: "S",
+        status: "pending",
         order: 1,
         steps: [{ id: "step1", name: "Step", order: 1 }],
       },

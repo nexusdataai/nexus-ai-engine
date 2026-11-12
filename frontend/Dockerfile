@@ -12,6 +12,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY tsconfig.json vite.config.ts vitest.config.ts tailwind.config.js postcss.config.js index.html ./
 COPY src ./src
+COPY public ./public
 
 RUN npm run build
 

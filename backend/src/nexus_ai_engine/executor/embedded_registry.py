@@ -34,6 +34,29 @@ async def _s3_write_exceptions(args: dict[str, Any]) -> dict[str, Any]:
     return {"path": args.get("path"), "written": True}
 
 
+_ETL_STEPS = (
+    "extract",
+    "validate_schema",
+    "transform",
+    "load",
+    "verify",
+    "register_vdl",
+    "materialize_warehouse",
+)
+
+
+def _etl_handler(step: str) -> ToolHandler:
+    async def _run(args: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "step": step,
+            "status": "ok",
+            "engine": "ai_engine_stub",
+            "journeyId": args.get("journeyId"),
+        }
+
+    return _run
+
+
 _DEFAULT_TOOLS: dict[str, ToolHandler] = {
     "echo": _echo,
     "query_virtual_entity": _query_virtual_entity,
@@ -41,6 +64,9 @@ _DEFAULT_TOOLS: dict[str, ToolHandler] = {
     "o2c_match_order_delivery_invoice": _o2c_match,
     "s3_write_exceptions": _s3_write_exceptions,
 }
+
+for _step in _ETL_STEPS:
+    _DEFAULT_TOOLS[f"etl.{_step}"] = _etl_handler(_step)
 
 
 class EmbeddedToolRegistry:
